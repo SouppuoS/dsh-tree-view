@@ -173,6 +173,10 @@ const PREFS_DEFAULTS = {
   // On by default, because a photocopy drawn as a branch doubles the canvas; the
   // switch in the Tree panel is there for when you want to see them anyway.
   dropEmptyForks: true,
+  // Draw the cross-session references: the dashed arrows and the marks a sender
+  // that is not on the canvas leaves on a card. On by default, because a reader
+  // who has never touched this expects the tree to say everything it knows.
+  showReferences: true,
   // Straight stretches longer than this fold into a single node (0 = never
   // fold). That covers the shared history above the first fork and the
   // unbranched run any one branch continues on. The latest turn of the session
@@ -1383,6 +1387,12 @@ const CSS = [
   // A faint scrim, not a card: enough surface for the rules and the block beside
   // them to stay legible over whatever the canvas is showing, without a frame or
   // a hard edge. No border, and the list still hides its scrollbar.
+  // One control, standing on the left edge and reading downward: it decides
+  // whether the cross-session layer is drawn at all.
+  '.mtx-rail{position:absolute;left:10px;top:50%;transform:translateY(-50%);z-index:5;display:flex;flex-direction:column;align-items:center}',
+  '.mtx-rail-btn{writing-mode:vertical-rl;appearance:none;padding:12px 5px;border:0;border-radius:10px;background:transparent;font-family:inherit;font-size:11px;letter-spacing:.14em;color:var(--dsw-alias-label-tertiary,#888);cursor:pointer;transition:color .15s ease,background .15s ease}',
+  '.mtx-rail-btn:hover{color:var(--dsw-alias-label-primary,#eee);background:var(--dsw-alias-interactive-bg-hover)}',
+  '.mtx-rail-btn[data-on]{color:var(--mtx-accent);background:color-mix(in srgb,var(--mtx-accent) 12%,transparent)}',
   '.mtx-outline{position:absolute;z-index:9;display:flex;align-items:flex-start;gap:12px;max-height:300px;padding:8px 10px;border-radius:12px;background:color-mix(in srgb,var(--mtx-surface) 62%,transparent);backdrop-filter:blur(12px);box-shadow:0 10px 28px var(--mtx-shadow);overflow:hidden}',
   '.mtx-outline-list{flex:none;width:26px;max-height:282px;overscroll-behavior:contain;overflow-y:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
   '.mtx-outline-list::-webkit-scrollbar{display:none}',
@@ -1613,6 +1623,9 @@ return {
         menuDemoteOpen: 'This is the conversation you have open',
         tagBadge: 'tag',
         filesLabel: 'files',
+        refsToggle: 'References',
+        refsOn: 'Show cross-session references',
+        refsOff: 'Hide cross-session references',
         tagAdd: 'Tag this turn',
         tagRemove: 'Remove the tag',
         tagNotePlaceholder: 'Note (Markdown), optional',
@@ -1686,6 +1699,9 @@ return {
         menuDemoteOpen: '这就是你当前打开的会话',
         tagBadge: '标记',
         filesLabel: '文件',
+        refsToggle: '跨会话引用',
+        refsOn: '显示跨会话引用',
+        refsOff: '隐藏跨会话引用',
         tagAdd: '标记这一轮',
         tagRemove: '取消标记',
         tagNotePlaceholder: '备注（Markdown，可留空）',
@@ -2603,7 +2619,7 @@ return {
         // pan and capture the pointer on the graph, which retargets the click
         // that follows to the graph — so the dialog's buttons received no click
         // at all and Cancel looked dead. Overlays belong on this list.
-        if (ev.target.closest && ev.target.closest('.mtx-outline,.mtx-link,.mtx-rename,.mtx-menu,.mtx-confirm')) return;
+        if (ev.target.closest && ev.target.closest('.mtx-rail,.mtx-outline,.mtx-link,.mtx-rename,.mtx-menu,.mtx-confirm')) return;
         if (cardEl) {
           // A press on a node only selects it: nodes stay where the layout put
           // them. Dragging them around was a way to lose the shape of a branch,
@@ -2688,7 +2704,7 @@ return {
                 ref: function (el) { if (el) edgeEls.current.set(key, el); else edgeEls.current.delete(key); },
               });
             }),
-            refs.edges.map(function (e) {
+            prefs.showReferences ? refs.edges.map(function (e) {
               const a = springs.current.get(e.from) || layout.pos.get(e.from);
               const b = springs.current.get(e.to) || layout.pos.get(e.to);
               return React.createElement('path', {
@@ -2696,7 +2712,7 @@ return {
                 className: 'mtx-edge mtx-edge-ref',
                 d: a && b ? edgePath(a.x, a.y + 58, b.x, b.y) : undefined,
               });
-            })
+            }) : null
           ),
           // Cards render from turnNodes, the version data of THIS render, and
           // take only geometry from the layout memo. Rendering from the layout
@@ -2786,7 +2802,7 @@ return {
                 // Material that came from a conversation which is NOT on this
                 // canvas: there is nothing here to point an arrow at, so the turn
                 // says where it came from instead.
-                n.incoming ? React.createElement('span', { className: 'mtx-card-refs' },
+                prefs.showReferences && n.incoming ? React.createElement('span', { className: 'mtx-card-refs' },
                   n.incoming.filter(function (link) { return !refs.sessions.has(link.senderSessionId); })
                     .slice(0, 3).map(function (link) {
                       return React.createElement('span', {
@@ -2970,6 +2986,19 @@ return {
             )
           );
         })(),
+        // The one control this panel keeps: it decides whether the cross-session
+        // layer is drawn. Standing on the left edge and reading downward, it stays
+        // out of the canvas's way — the canvas is where the tree is read.
+        React.createElement('div', { className: 'mtx-rail' },
+          React.createElement('button', {
+            type: 'button',
+            className: 'mtx-rail-btn',
+            'data-on': prefs.showReferences ? '' : undefined,
+            'aria-pressed': prefs.showReferences ? 'true' : 'false',
+            title: prefs.showReferences ? t('refsOff') : t('refsOn'),
+            onClick: function () { prefsStore.set({ showReferences: !prefs.showReferences }); },
+          }, t('refsToggle'))
+        ),
         tree && tree.error ? React.createElement('div', { className: 'mtx-error' }, tree.error) : null,
         renameError ? React.createElement('div', { className: 'mtx-error' }, renameError) : null,
         // A degraded host is stated once, in place, rather than discovered by

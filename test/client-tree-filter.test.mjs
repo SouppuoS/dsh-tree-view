@@ -137,6 +137,11 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   });
   // React implements onMouseEnter from mouseover, which is what a real hover
   // sends first.
+  const clickRail = () => act(async () => {
+    const button = dom.window.document.querySelector('.mtx-rail-btn');
+    assert.ok(button, 'the rail button exists');
+    button.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  });
   const hoverCard = (id) => act(async () => {
     const el = dom.window.document.querySelector('.mtx-card[data-id="' + id + '"]');
     assert.ok(el, 'card ' + id + ' is drawn');
@@ -194,7 +199,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   };
   return {
     dom, cardIds, offsets, titles, links, clickCard, foldCard,
-    menuItems, openMenu, clickMenuItem, hoverCard, outlineItems, outlineTurns, clickOutline, hoverOutlineRow, worldScale, wheelOn,
+    menuItems, openMenu, clickMenuItem, clickRail, hoverCard, outlineItems, outlineTurns, clickOutline, hoverOutlineRow, worldScale, wheelOn,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
     opened, workspaceOpened, tabClicks,
   };
@@ -773,6 +778,37 @@ test('a tagged turn carries the commit every repository was on', async (t) => {
     'each repository is a short commit and its path');
   assert.equal(chips[0].getAttribute('title'), '. @ abcdef1234567890 (main)',
     'with the full commit and the branch on hand');
+});
+
+test('the left rail decides whether the cross-session layer is drawn', async (t) => {
+  const rootTurns = Array.from({ length: 4 }, (_, i) => ({ turn: i + 1, text: 'root ' + (i + 1), time: i + 1 }));
+  const childTurns = Array.from({ length: 2 }, (_, i) => ({ turn: i + 1, text: 'child ' + (i + 1), time: 10 + i }));
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, [
+    { sessionId: 'session-root', createdAt: 1, current: true, turns: rootTurns,
+      incoming: [
+        { senderSessionId: 'session-child', kind: 'subagent-settled', summary: 'done', feedsTurn: 3 },
+        { senderSessionId: 'outside-1234', kind: 'agent-message', summary: 'hi', feedsTurn: 2 },
+      ] },
+    { sessionId: 'session-child', parentSessionId: 'session-root', createdAt: 2, subagent: true, forkTurn: 0, turns: childTurns },
+  ]);
+
+  const rail = view.dom.window.document.querySelector('.mtx-rail-btn');
+  assert.ok(rail, 'the panel keeps one control, standing on the left');
+  assert.equal(rail.hasAttribute('data-on'), true, 'and it starts on, so nothing is hidden by default');
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-edge-ref').length, 1, 'with the arrow drawn');
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-card-ref').length, 1, 'and the mark beside it');
+
+  await view.clickRail();
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-edge-ref').length, 0,
+    'turning it off takes the cross-session arrows away');
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-card-ref').length, 0,
+    'and the marks that stood in for the senders it could not point at');
+  assert.equal(rail.hasAttribute('data-on'), false, 'and the control says so');
+  assert.equal(JSON.parse(view.dom.window.localStorage.getItem('dsh-tree-view:prefs')).showReferences, false,
+    'the choice outlives the panel');
+
+  await view.clickRail();
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-edge-ref').length, 1, 'and back on again');
 });
 
 test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions.open', async (t) => {
