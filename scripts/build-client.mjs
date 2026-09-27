@@ -49,9 +49,17 @@ const out = PROLOGUE + fragment + EPILOGUE;
 const target = join(root, 'lib', 'client.js');
 
 if (process.argv.includes('--check')) {
-  const current = readFileSync(target, 'utf8');
+  // lib/client.js is gitignored, so a fresh checkout has none. That answers the
+  // same question as a stale one — "run the build" — and should not be an ENOENT
+  // stack from the one entry point the header documents for checking.
+  let current;
+  try {
+    current = readFileSync(target, 'utf8');
+  } catch (error) {
+    current = undefined;
+  }
   if (current !== out) {
-    console.error('lib/client.js is stale — run: node scripts/build-client.mjs');
+    console.error('lib/client.js is stale or missing — run: node scripts/build-client.mjs');
     process.exit(1);
   }
   console.log('lib/client.js is up to date');
