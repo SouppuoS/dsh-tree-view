@@ -1337,22 +1337,20 @@ const CSS = [
   // The fold outline: the branch menu's shape, but it lists turns and opens on
   // hover instead of on a right-click.
   // The fold outline borrows the conversation view's turn rail: a compact column
-  // of short rules, one per hidden turn. No frame, no scrollbar, and only the
-  // rule the pointer is on says what turn it stands for — the rest stay rules.
-  // It lives in the panel's coordinates rather than the canvas's, so it keeps its
-  // size at any zoom.
-  '.mtx-outline{position:absolute;z-index:9;width:42px;max-height:300px;display:flex;flex-direction:column;border-radius:14px;background:color-mix(in srgb,var(--mtx-surface) 93%,transparent);backdrop-filter:blur(14px);box-shadow:0 16px 40px var(--mtx-shadow-strong),0 2px 6px var(--mtx-shadow);overflow:hidden;transition:width .2s cubic-bezier(.2,.8,.2,1)}',
-  '.mtx-outline[data-open]{width:266px}',
-  '.mtx-outline-list{overscroll-behavior:contain;overflow-y:auto;padding:8px 7px;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
+  // of rules, one per hidden turn, with no surface of its own — no frame, no
+  // background, no scrollbar. Only the open rule is marked, and what it stands
+  // for is stated in a block beside the rail rather than beside that rule.
+  '.mtx-outline{position:absolute;z-index:9;display:flex;align-items:flex-start;gap:12px;max-height:300px;background:transparent}',
+  '.mtx-outline-list{flex:none;width:26px;max-height:300px;overscroll-behavior:contain;overflow-y:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
   '.mtx-outline-list::-webkit-scrollbar{display:none}',
-  '.mtx-outline-item{display:flex;align-items:center;gap:10px;height:14px;padding:0;border:0;background:transparent;font-family:inherit;font-size:11.5px;line-height:14px;color:inherit;text-align:left;cursor:pointer}',
-  '.mtx-outline-bar{flex:none;width:22px;height:2.5px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 58%,transparent);transition:width .16s ease,background .16s ease}',
-  '.mtx-outline-item[data-active] .mtx-outline-bar{width:30px;background:var(--mtx-accent)}',
-  '.mtx-outline-detail{display:none;flex:1;min-width:0;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}',
-  '.mtx-outline-item[data-active] .mtx-outline-detail{display:flex}',
-  '.mtx-outline-icon{flex:none;width:13px;text-align:center;font-size:11px;color:var(--dsw-alias-label-tertiary,#888)}',
-  '.mtx-outline-turn{flex:none;color:var(--dsw-alias-label-secondary,#bbb)}',
-  '.mtx-outline-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-primary,#eee)}',
+  '.mtx-outline-item{display:flex;align-items:center;height:9px;padding:0;border:0;background:transparent;cursor:pointer}',
+  '.mtx-outline-bar{width:16px;height:2px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);transition:width .15s ease,background .15s ease}',
+  '.mtx-outline-item:hover .mtx-outline-bar{width:22px}',
+  '.mtx-outline-item[data-active] .mtx-outline-bar{width:24px;background:var(--mtx-accent)}',
+  '.mtx-outline-info{flex:none;width:236px;display:flex;flex-direction:column;gap:3px}',
+  '.mtx-outline-info-head{display:flex;align-items:center;gap:7px;font-size:11.5px;line-height:15px;color:var(--dsw-alias-label-secondary,#bbb);text-shadow:0 1px 3px var(--mtx-shadow-strong)}',
+  '.mtx-outline-icon{flex:none;width:13px;text-align:center;font-size:11px}',
+  '.mtx-outline-text{font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary,#eee);text-shadow:0 1px 3px var(--mtx-shadow-strong);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}',
   '.mtx-outline-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-tertiary,#888)}',
   '.mtx-outline-item:hover .mtx-outline-text{color:var(--dsw-alias-label-primary,#eee)}',
   '.mtx-menu-item[disabled]{color:var(--dsw-alias-label-tertiary,#888);cursor:not-allowed}',
@@ -2795,32 +2793,33 @@ return {
         ),
         // What a fold hides, drawn beside the pointer that opened it. The panel
         // lives in the graph's own coordinates rather than the canvas's, so it
-        // keeps its size at any zoom, its list scrolls like any other list, and
-        // the canvas underneath is none the wiser.
+        // keeps its size at any zoom, and it carries no surface of its own: the
+        // rules and the one open turn are the whole of it.
         foldHover === null ? null : (function () {
           const hovered = turnNodes.find(function (n) { return n.id === foldHover.id; });
           if (!hovered || !hovered.foldNodes || hovered.foldNodes.length === 0) return null;
           const el = graphRef.current;
           const boxW = el ? el.clientWidth : 640;
           const boxH = el ? el.clientHeight : 420;
-          const openW = 268;
-          // Beside the pointer, but never off the panel. The room it needs is the
-          // OPEN width, because hovering the rail widens it.
+          const openW = 276;
+          // Beside the pointer, but never off the panel.
           const left = Math.max(8, Math.min(foldHover.x + 16, Math.max(8, boxW - openW - 12)));
-          const top = Math.max(8, Math.min(foldHover.y - 22, Math.max(8, boxH - 240)));
+          const top = Math.max(8, Math.min(foldHover.y - 22, Math.max(8, boxH - 220)));
+          // The first turn is open before the pointer picks one, so the panel
+          // always says something instead of waiting to be interrogated.
+          const picked = outlineRow === null ? undefined
+            : hovered.foldNodes.find(function (item) { return item.turn === outlineRow; });
+          const shown = picked || hovered.foldNodes[0];
           return React.createElement('div', {
             className: 'mtx-outline',
             key: 'fold-outline',
-            'data-open': outlineRow === null ? undefined : '',
-            style: {
-              left: left + 'px',
-              top: top + 'px',
-              maxWidth: Math.max(140, Math.min(openW, boxW - left - 12)) + 'px',
-            },
+            style: { left: left + 'px', top: top + 'px' },
             onMouseEnter: foldOutlineHold,
             onMouseLeave: function () { setOutlineRow(null); foldOutlineLeave(); },
             onPointerDown: function (ev) { ev.stopPropagation(); },
           },
+            // The rules: one per hidden turn and nothing else. Only the open one
+            // stands out.
             React.createElement('div', { className: 'mtx-outline-list' },
               hovered.foldNodes.map(function (hidden) {
                 return React.createElement('button', {
@@ -2828,7 +2827,7 @@ return {
                   type: 'button',
                   className: 'mtx-outline-item',
                   'data-turn': hidden.turn,
-                  'data-active': outlineRow === hidden.turn ? '' : undefined,
+                  'data-active': shown.turn === hidden.turn ? '' : undefined,
                   title: clip(hidden.text || '', 120),
                   onMouseEnter: function () { setOutlineRow(hidden.turn); },
                   onClick: function (ev) {
@@ -2836,19 +2835,18 @@ return {
                     setFoldHover(null);
                     openVersion(hidden.id);
                   },
-                },
-                  // The rule IS the affordance, one per hidden turn, the way the
-                  // conversation view's own rail marks every turn. Hovering the
-                  // rail widens it and the row reveals what that turn was.
-                  React.createElement('span', { className: 'mtx-outline-bar' }),
-                  React.createElement('span', { className: 'mtx-outline-detail' },
-                    React.createElement('span', { className: 'mtx-outline-icon' },
-                      hidden.isRoot ? '●' : (hidden.operation === 'retry' ? '↻' : (hidden.operation === 'edit' ? '✎' : '💬'))),
-                    React.createElement('span', { className: 'mtx-outline-turn' }, t('turn', { turn: hidden.turn })),
-                    React.createElement('span', { className: 'mtx-outline-text' }, clip(hidden.text || '', 60))
-                  )
-                );
+                }, React.createElement('span', { className: 'mtx-outline-bar' }));
               })
+            ),
+            // One block for whichever turn is open, deliberately NOT lined up with
+            // its rule: the rail is an index, not a table.
+            React.createElement('div', { className: 'mtx-outline-info' },
+              React.createElement('div', { className: 'mtx-outline-info-head' },
+                React.createElement('span', { className: 'mtx-outline-icon' },
+                  shown.isRoot ? '●' : (shown.operation === 'retry' ? '↻' : (shown.operation === 'edit' ? '✎' : '💬'))),
+                React.createElement('span', { className: 'mtx-outline-turn' }, t('turn', { turn: shown.turn }))
+              ),
+              React.createElement('div', { className: 'mtx-outline-text' }, clip(shown.text || '', 180))
             )
           );
         })(),

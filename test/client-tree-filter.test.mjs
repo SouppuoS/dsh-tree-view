@@ -421,25 +421,26 @@ test('a fold opens its outline on hover, and clicking it changes nothing', async
   assert.deepEqual(view.outlineTurns(), Array.from({ length: 14 }, (_, i) => i + 1),
     'hovering lists the turns it hides, in order');
 
-  // The rail is the conversation view's shape: one short rule per hidden turn,
-  // which widens on hover to reveal what that turn was.
+  // The rail is the conversation view's shape: one short rule per hidden turn and
+  // nothing else. What a rule stands for is stated in ONE block beside the rail,
+  // not lined up with the rule it describes.
   assert.equal(view.dom.window.document.querySelectorAll('.mtx-outline-bar').length, 14,
     'every hidden turn gets a rule');
-  assert.equal(view.dom.window.document.querySelectorAll('.mtx-outline-detail').length, 14,
-    'and the row behind each rule carries its turn');
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-outline-info').length, 1,
+    'and a single block says what the open turn was');
 
-  // A rule says what it stands for only while the pointer is on it: the rail is
-  // a list of rules, not a list of paragraphs.
-  const rail = view.dom.window.document.querySelector('.mtx-outline');
-  assert.equal(view.dom.window.document.querySelectorAll('.mtx-outline-item[data-active]').length, 0,
-    'nothing is open before a rule is pointed at');
-  assert.equal(rail.hasAttribute('data-open'), false, 'so the rail stays compact');
+  const activeTurn = () => {
+    const active = view.dom.window.document.querySelectorAll('.mtx-outline-item[data-active]');
+    return active.length === 1 ? Number(active[0].getAttribute('data-turn')) : null;
+  };
+  const info = () => view.dom.window.document.querySelector('.mtx-outline-info').textContent;
+
+  assert.equal(activeTurn(), 1, 'the first rule is open before the pointer picks one');
+  assert.match(info(), /root turn 1/, 'and the block already says what it was: ' + info());
 
   await view.hoverOutlineRow(5);
-  const active = view.dom.window.document.querySelectorAll('.mtx-outline-item[data-active]');
-  assert.equal(active.length, 1, 'pointing at a rule opens exactly one row');
-  assert.equal(active[0].getAttribute('data-turn'), '5', 'and it is the one under the pointer');
-  assert.ok(rail.hasAttribute('data-open'), 'while the rail widens to make room for it');
+  assert.equal(activeTurn(), 5, 'pointing at a rule opens exactly that one');
+  assert.match(info(), /root turn 5/, 'and the block follows it: ' + info());
 
   // It is placed in the panel's own coordinates rather than the canvas's, so it
   // does not travel with a pan or shrink with a zoom.
