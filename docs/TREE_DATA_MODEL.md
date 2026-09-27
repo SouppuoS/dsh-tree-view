@@ -185,6 +185,38 @@ an archived branch instead: visible, dimmed, and reversible.
 
 ---
 
+### 2.10 Tagged Turns
+
+*Location: lib/tree-state.js, lib/index.js*
+
+A tag is the reader's own mark on a turn, written from the assistant action row in
+the Chat view. It lives in the sidecar beside branch names and archive membership
+— never in the session log — because it is a note about a conversation, not part
+of one.
+
+Two keys are involved, and they are not the same:
+
+- **Stored by message id.** The action row hands its entries one durable message
+  id: the FINAL assistant message of the turn, and nothing else. So the sidecar's
+  tag map is keyed by that id, which is also what makes the toggle a single
+  lookup for the button.
+- **Drawn by turn.** The tree is a turn graph. The host indexes every identified
+  surface message to its turn while parsing the log (messageTurnsIn, cached with
+  the parse) and intersects that with the tag store when it builds the payload:
+  each version's turns carry their own tag, and the payload also carries
+  messageTags keyed by message, which is what the action row reads.
+
+Because the tag is resolved through the log, a tag on a message inside a shared
+prefix appears on the turn node the tree actually draws, not on copies of it
+inside descendants.
+
+Folding treats a tagged turn as a landmark: foldLongRuns refuses to pass through
+one, exactly as it already refuses the latest turn of the session being read, so a
+fold can never swallow the turn the reader marked.
+
+A tag naming a message the session never wrote is refused at the route with a 400:
+the id is checked against that session's own event log before anything is stored.
+
 ## 3. Graph Layout & Springs
 
 *Location: [`plugin.client.js`](../plugin.client.js#L567-L612)*

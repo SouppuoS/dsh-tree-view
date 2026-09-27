@@ -140,6 +140,7 @@ Performs branch creation or reactivation.
 - **`edit`**: Rewinds to before the specified user turn, creates a new branched session, appends a durable `message-tree/version` marker, and submits the replacement prompt.
 - **`retry`**: Rewinds to before the target turn, creates a child session, and replays the original user prompt.
 - **`activate`**: Unarchives an archived version session via the host registry queue so the client can navigate to it.
+- **`tag`** / **`untag`**: Put a reader's mark on the turn a message belongs to, or take it off. The message id is verified against the session's own log first; the tag itself is stored in the sidecar, never in the session log.
 
 ---
 
