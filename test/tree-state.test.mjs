@@ -114,6 +114,9 @@ function harness() {
   result('c4', false);
   call('c5', 'edit', { file_path: '/repo/src/d.ts', old_string: 'a', new_string: 'b' });
   result('c5', false);
+  // A declared deliverable is the other source: an agent that writes files inside
+  // a script never emits a write/edit call at all, so `present` is what names them.
+  append('deliverables/presented', { turn: 1, callId: 'p1', files: [{ path: '/repo/out/report.md', description: 'the report' }] });
   append('turn/end', { turn: 1 });
 
   const registry = {
@@ -219,8 +222,9 @@ test('a turn carries the files it produced, and only the ones it really wrote', 
   process.env.DSH_HOME = home;
   try {
     const response = await harness()('GET');
-    assert.deepEqual(response.body.versions[0].turns[0].files, ['/repo/src/a.ts', '/repo/src/d.ts'],
-      'successful mutations, first-seen order, one entry per file, reads excluded');
+    assert.deepEqual(response.body.versions[0].turns[0].files,
+      ['/repo/src/a.ts', '/repo/src/d.ts', '/repo/out/report.md'],
+      'successful mutations then declared deliverables, first-seen order, one entry per file, reads excluded');
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME;
     else process.env.DSH_HOME = previous;
