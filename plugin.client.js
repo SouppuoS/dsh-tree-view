@@ -1091,7 +1091,7 @@ function buildTurnTree(versions, currentSessionId, options) {
  * or null when no run is long enough to be worth a node. `minHidden` is that
  * floor: a fold that hides one turn just trades a card for a card.
  */
-function foldLongRuns(nodes, minHidden) {
+function foldLongRuns(nodes, minHidden, keepIncoming) {
   if (!(minHidden >= 1) || !Array.isArray(nodes) || nodes.length === 0) return null;
   let origin = null;
   for (let i = 0; i < nodes.length; i++) {
@@ -1109,11 +1109,12 @@ function foldLongRuns(nodes, minHidden) {
   function kidsOf(n) { return children.get(n.id) || []; }
   // A pass-through is a turn that neither decides anything nor is a landmark.
   function passThrough(n) {
-    // A tagged turn is a landmark the reader put there on purpose, and so is one
-    // that took material from another conversation, so a fold must never swallow
-    // either — the same reason the latest turn is excluded.
+    // A tagged turn is a landmark the reader put there on purpose, so a fold must
+    // never swallow it — the same reason the latest turn is excluded. A turn that
+    // took material from another conversation is a landmark only while that layer
+    // is drawn: with it hidden there is nothing to keep the canvas open for.
     return kidsOf(n).length === 1 && !n.isRoot && n.head !== true
-      && n.tag === undefined && n.incoming === undefined;
+      && n.tag === undefined && !(keepIncoming && n.incoming !== undefined);
   }
 
   const hiddenIds = new Set();
@@ -1390,9 +1391,10 @@ const CSS = [
   // One control, standing on the left edge and reading downward: it decides
   // whether the cross-session layer is drawn at all.
   '.mtx-rail{position:absolute;left:10px;top:50%;transform:translateY(-50%);z-index:5;display:flex;flex-direction:column;align-items:center}',
-  '.mtx-rail-btn{writing-mode:vertical-rl;appearance:none;padding:12px 5px;border:0;border-radius:10px;background:transparent;font-family:inherit;font-size:11px;letter-spacing:.14em;color:var(--dsw-alias-label-tertiary,#888);cursor:pointer;transition:color .15s ease,background .15s ease}',
+  '.mtx-rail-btn{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;padding:0;appearance:none;border:0;border-radius:11px;background:transparent;color:var(--dsw-alias-label-tertiary,#888);cursor:pointer;transition:color .15s ease,background .15s ease}',
   '.mtx-rail-btn:hover{color:var(--dsw-alias-label-primary,#eee);background:var(--dsw-alias-interactive-bg-hover)}',
-  '.mtx-rail-btn[data-on]{color:var(--mtx-accent);background:color-mix(in srgb,var(--mtx-accent) 12%,transparent)}',
+  '.mtx-rail-btn[data-on]{color:var(--mtx-accent);background:color-mix(in srgb,var(--mtx-accent) 13%,transparent)}',
+  '.mtx-rail-btn:focus-visible{outline:2px solid var(--mtx-accent);outline-offset:2px}',
   '.mtx-outline{position:absolute;z-index:9;display:flex;align-items:flex-start;gap:12px;max-height:300px;padding:8px 10px;border-radius:12px;background:color-mix(in srgb,var(--mtx-surface) 62%,transparent);backdrop-filter:blur(12px);box-shadow:0 10px 28px var(--mtx-shadow);overflow:hidden}',
   '.mtx-outline-list{flex:none;width:26px;max-height:282px;overscroll-behavior:contain;overflow-y:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
   '.mtx-outline-list::-webkit-scrollbar{display:none}',
@@ -1731,6 +1733,22 @@ return {
         console.warn('[dsh-tree-view] Failed to register translations; using English.', e);
       }
     });
+
+    /**
+     * One turn on the left, two that fed it on the right: the shape this control
+     * turns on and off. Drawn like the panel's other glyphs.
+     */
+    function RefsIcon() {
+      return React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
+        React.createElement('path', {
+          d: 'M4.9 7.3 11.3 4.5M4.9 8.7l6.4 2.8',
+          stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round',
+        }),
+        React.createElement('circle', { cx: 3.4, cy: 8, r: 1.6, fill: 'currentColor' }),
+        React.createElement('circle', { cx: 12.6, cy: 3.8, r: 1.6, fill: 'currentColor' }),
+        React.createElement('circle', { cx: 12.6, cy: 12.2, r: 1.6, fill: 'currentColor' })
+      );
+    }
 
     /** A tag glyph, drawn like the row's other icons so it sits in the row. */
     function TagIcon() {
@@ -2180,8 +2198,8 @@ return {
       const FOLD_FLOOR = 2;
       const foldAt = prefs.foldSharedAt > 0 ? Math.max(prefs.foldSharedAt, FOLD_FLOOR) : 0;
       const foldable = React.useMemo(function () {
-        return foldAt > 0 ? foldLongRuns(fullNodes, foldAt) : null;
-      }, [fullNodes, foldAt]);
+        return foldAt > 0 ? foldLongRuns(fullNodes, foldAt, prefs.showReferences) : null;
+      }, [fullNodes, foldAt, prefs.showReferences]);
       // A fold is a summary, not a drawer. The outline it opens on hover is how
       // the turns inside it are read and reached, so there is no in-canvas unfold
       // left to keep state for; turning folding off is a setting.
@@ -2995,9 +3013,12 @@ return {
             className: 'mtx-rail-btn',
             'data-on': prefs.showReferences ? '' : undefined,
             'aria-pressed': prefs.showReferences ? 'true' : 'false',
+            // No words on the control: the glyph says what it is about, and the
+            // tooltip says exactly what a click will do.
+            'aria-label': t('refsToggle'),
             title: prefs.showReferences ? t('refsOff') : t('refsOn'),
             onClick: function () { prefsStore.set({ showReferences: !prefs.showReferences }); },
-          }, t('refsToggle'))
+          }, RefsIcon())
         ),
         tree && tree.error ? React.createElement('div', { className: 'mtx-error' }, tree.error) : null,
         renameError ? React.createElement('div', { className: 'mtx-error' }, renameError) : null,

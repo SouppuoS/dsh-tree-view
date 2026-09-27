@@ -795,6 +795,10 @@ test('the left rail decides whether the cross-session layer is drawn', async (t)
   const rail = view.dom.window.document.querySelector('.mtx-rail-btn');
   assert.ok(rail, 'the panel keeps one control, standing on the left');
   assert.equal(rail.hasAttribute('data-on'), true, 'and it starts on, so nothing is hidden by default');
+  assert.equal(rail.textContent.trim(), '', 'the control carries no words');
+  assert.ok(rail.querySelector('svg'), 'only the glyph');
+  assert.ok(rail.getAttribute('aria-label'), 'named for assistive technology even so');
+  assert.match(rail.getAttribute('title'), /cross-session references/, 'and the tooltip says what it does');
   assert.equal(view.dom.window.document.querySelectorAll('.mtx-edge-ref').length, 1, 'with the arrow drawn');
   assert.equal(view.dom.window.document.querySelectorAll('.mtx-card-ref').length, 1, 'and the mark beside it');
 
@@ -809,6 +813,23 @@ test('the left rail decides whether the cross-session layer is drawn', async (t)
 
   await view.clickRail();
   assert.equal(view.dom.window.document.querySelectorAll('.mtx-edge-ref').length, 1, 'and back on again');
+});
+
+test('turning the layer off folds the turns it was holding open', async (t) => {
+  // Six turns, and the second one took material from outside. While that layer is
+  // drawn the turn is a landmark; with it hidden there is nothing left to keep the
+  // canvas open for, so it folds with the rest of the stretch.
+  const line = Array.from({ length: 6 }, (_, i) => ({ turn: i + 1, text: 'turn ' + (i + 1), time: i + 1 }));
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' },
+    [{ sessionId: 'session-root', createdAt: 1, current: true, turns: line,
+       incoming: [{ senderSessionId: 'outside-1', kind: 'agent-message', summary: 'x', feedsTurn: 2 }] }]);
+
+  assert.ok(view.cardIds().includes('session-root#t2'), 'the fed turn is drawn while the layer is on');
+  await view.clickRail();
+  assert.ok(!view.cardIds().includes('session-root#t2'), 'and folds away once the layer is off');
+  assert.deepEqual(
+    [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold] .mtx-card-title')].map((el) => el.textContent),
+    ['5 shared turns'], 'one fold now covers the whole stretch');
 });
 
 test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions.open', async (t) => {
