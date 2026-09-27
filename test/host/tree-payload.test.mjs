@@ -53,10 +53,14 @@ function harness(options) {
       events.push({ seq: events.length, time: 99, type: 'message-tree/version', data: { schemaVersion: 1, sessionId: spec.id, effect: { operation: 'edit', targetTurn: forkTurns > 0 ? forkTurns : 1 } }, ignorable: true });
     }
     const inheritedEventCount = forkTurns === 0 ? 0 : 1 + forkTurns * 3;
-    const session = { id: spec.id, header, inheritedEventCount, snapshotEvents: () => Object.freeze([...events]) };
+    // A log this build cannot read at all: truncated mid-frame, or a shape the
+    // collector rejects. One of these in a family must not cost the whole tree.
+    const session = spec.unreadable === true
+      ? { id: spec.id, header, inheritedEventCount, snapshotEvents: () => { throw new Error('unreadable log'); } }
+      : { id: spec.id, header, inheritedEventCount, snapshotEvents: () => Object.freeze([...events]) };
     Object.defineProperty(session, 'seq', { get: () => events.length });
     Object.defineProperty(session, 'events', { get: () => { throw new Error('retired .events read'); } });
-    records.set(spec.id, { session, events });
+    records.set(spec.id, { session, events, unreadable: spec.unreadable === true });
   }
 
   let route;
@@ -89,6 +93,7 @@ function harness(options) {
       readSession: async (id) => {
         const record = records.get(id);
         if (!record) throw new Error('not found');
+        if (record.unreadable === true) throw new Error('unreadable log');
         return {
           session: record.session.header,
           events: structuredClone(record.events),
@@ -147,6 +152,25 @@ test('a subagent conversation in the family is flagged as one', async () => {
   assert.equal(byId.get('session-sub-delegate').subagent, true, 'and so is its own child');
   assert.equal(byId.get('session-sub-delegate').delegationDepth, 2, 'with the depth when it is nested');
   assert.equal(byId.get('session-root').subagent, undefined, 'the conversation itself is not');
+});
+
+test('one unreadable log does not cost the whole family', async () => {
+  // A truncated or foreign log used to reject the request outright, so every other
+  // version in the conversation vanished from the panel because of one bad file.
+  // The orphan scan already treats that failure as "contributes nothing"; the
+  // family walk now agrees with it.
+  const get = harness({
+    sessions: [
+      { id: 'session-root' },
+      { id: 'session-broken', parent: 'session-root', createdAt: 10, unreadable: true },
+    ],
+  });
+  const response = await get('session-root');
+  assert.equal(response.status, 200, 'the family still answers');
+  const byId = new Map(response.body.versions.map((v) => [v.sessionId, v]));
+  assert.deepEqual([...byId.keys()], ['session-root', 'session-broken'], 'and still lists every version');
+  assert.deepEqual(byId.get('session-broken').turns, [], 'the unreadable one is drawn without its turns');
+  assert.ok(byId.get('session-root').turns.length > 0, 'while the readable one keeps its own');
 });
 
 test('an archived fork stays in the tree, marked as archived', async () => {

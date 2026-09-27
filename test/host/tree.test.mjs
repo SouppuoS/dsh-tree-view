@@ -159,6 +159,26 @@ check('a same-turn sibling sees only the fork original',
   ancestorChainFromLog('A', [marker('A', 1, 2)]).map((l) => l.sessionId), ['A']);
 check('a root session has no chain', ancestorChainFromLog(undefined, []), []);
 
+// A marker written by a build that names its owner, so an ancestor can be looked
+// up by name rather than counted back to. B -> C, then S edits C.
+function namedMarker(owner, parentId, targetTurn, time) {
+  return { data: { sessionId: owner, effect: { targetTurn }, inverse: { sessionId: parentId } }, time };
+}
+const editLog = [namedMarker('B', 'A', 1, 2), namedMarker('C', 'B', 2, 3), namedMarker('S', 'C', 3, 4)];
+check('an edit branch counts back from its own marker',
+  ancestorChainFromLog('C', editLog, 'S').map((l) => l.sessionId), ['C', 'B', 'A']);
+check('and every link carries its own marker',
+  ancestorChainFromLog('C', editLog, 'S').map((l) => l.marker && l.marker.time), [3, 2, undefined]);
+
+// F is a NATIVE fork of C: DSH copied C's whole log, so F wrote no marker of its
+// own and the last marker in F's log belongs to C. Counting one back from the end
+// would hand C the marker of B and drop B from the chain entirely.
+const forkLog = [namedMarker('B', 'A', 1, 2), namedMarker('C', 'B', 2, 3)];
+check('a native fork keeps every ancestor it inherited',
+  ancestorChainFromLog('C', forkLog, 'F').map((l) => l.sessionId), ['C', 'B', 'A']);
+check('and does not give its parent the grandparent marker',
+  ancestorChainFromLog('C', forkLog, 'F').map((l) => l.marker && l.marker.time), [3, 2, undefined]);
+
 // collectFamily bridges a deleted middle link C between B and D.
 const bridged = collectFamily('A', [
   { id: 'A', createdAt: 1, ghost: false },
