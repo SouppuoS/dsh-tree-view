@@ -8,11 +8,15 @@ import { test } from 'node:test';
 import { apply } from '../lib/index.js';
 import {
   LABEL_MAX_LENGTH,
+  TAG_NOTE_MAX_LENGTH,
+  clearTag,
   legacyLabelsPath,
   normalizeLabel,
+  normalizeNote,
   readState,
   setDemoted,
   setLabel,
+  setTag,
   stateFilePath,
   writeState,
 } from '../lib/tree-state.js';
@@ -23,27 +27,27 @@ test('the sidecar round-trips and tolerates damage', () => {
   const dir = scratch();
   const file = join(dir, 'nested', 'state.json');
 
-  assert.deepEqual(readState(file), { labels: {}, demoted: {} }, 'a missing sidecar means "nothing recorded", not an error');
+  assert.deepEqual(readState(file), { labels: {}, demoted: {}, tags: {} }, 'a missing sidecar means "nothing recorded", not an error');
 
   writeState(file, { labels: { 'session-a': '方案 B' }, demoted: { 'session-z': true } });
-  assert.deepEqual(readState(file), { labels: { 'session-a': '方案 B' }, demoted: { 'session-z': true } });
+  assert.deepEqual(readState(file), { labels: { 'session-a': '方案 B' }, demoted: { 'session-z': true }, tags: {} });
   assert.ok(readFileSync(file, 'utf8').endsWith('\n'), 'the file stays human-readable');
 
   writeFileSync(file, '{ this is not json');
-  assert.deepEqual(readState(file), { labels: {}, demoted: {} }, 'a truncated write must not take the tree view down');
+  assert.deepEqual(readState(file), { labels: {}, demoted: {}, tags: {} }, 'a truncated write must not take the tree view down');
 
   writeFileSync(file, '["not", "a", "map"]');
-  assert.deepEqual(readState(file), { labels: {}, demoted: {} }, 'a foreign JSON shape degrades the same way');
+  assert.deepEqual(readState(file), { labels: {}, demoted: {}, tags: {} }, 'a foreign JSON shape degrades the same way');
 
   writeFileSync(file, JSON.stringify({ labels: { a: 'kept', b: 42, c: '' }, demoted: { d: 'yes', e: true } }));
-  assert.deepEqual(readState(file), { labels: { a: 'kept' }, demoted: { e: true } }, 'only real names and real flags survive');
+  assert.deepEqual(readState(file), { labels: { a: 'kept' }, demoted: { e: true }, tags: {} }, 'only real names and real flags survive');
 });
 
 test('names written by the first release still read', () => {
   const dir = scratch();
   const file = join(dir, 'state.json');
   writeFileSync(legacyLabelsPath(file), JSON.stringify({ 'session-legacy': '旧名字' }));
-  assert.deepEqual(readState(file), { labels: { 'session-legacy': '旧名字' }, demoted: {} },
+  assert.deepEqual(readState(file), { labels: { 'session-legacy': '旧名字' }, demoted: {}, tags: {} },
     'the older labels.json is a one-way migration source');
 });
 
@@ -63,13 +67,13 @@ test('names and memberships are written independently', () => {
   setLabel(file, 'session-a', '方案 B');
   setDemoted(file, 'session-a', true);
   setLabel(file, 'session-b', '方案 C');
-  assert.deepEqual(readState(file), { labels: { 'session-a': '方案 B', 'session-b': '方案 C' }, demoted: { 'session-a': true } });
+  assert.deepEqual(readState(file), { labels: { 'session-a': '方案 B', 'session-b': '方案 C' }, demoted: { 'session-a': true }, tags: {} });
 
   setLabel(file, 'session-a', '');
-  assert.deepEqual(readState(file), { labels: { 'session-b': '方案 C' }, demoted: { 'session-a': true } }, 'clearing a name keeps membership');
+  assert.deepEqual(readState(file), { labels: { 'session-b': '方案 C' }, demoted: { 'session-a': true }, tags: {} }, 'clearing a name keeps membership');
 
   setDemoted(file, 'session-a', false);
-  assert.deepEqual(readState(file), { labels: { 'session-b': '方案 C' }, demoted: {} });
+  assert.deepEqual(readState(file), { labels: { 'session-b': '方案 C' }, demoted: {}, tags: {} });
 });
 
 // The route is the only surface the client uses, so the moves are exercised
@@ -89,6 +93,9 @@ function harness() {
   append('request/header', { header: { config: { provider: 'qa', model: 'qa' } } });
   append('turn/start', { turn: 1 });
   append('user/message', { data: undefined, id: 'm1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'first' }] });
+  // A tag is written from the action row, which names the turn's FINAL
+  // assistant message — so the fixture has to carry one for the id to resolve.
+  append('assistant/message', { message: { id: 'a1', role: 'assistant', source: { kind: 'model', provider: 'qa', model: 'qa' }, content: [{ type: 'text', text: 'answer' }] } });
   append('turn/end', { turn: 1 });
 
   const registry = {
@@ -171,3 +178,54 @@ test('the route names a version, takes it out of the main chat and puts it back'
     else process.env.DSH_HOME = previous;
   }
 });
+
+test('a note is trimmed and bounded, and a tag survives the round trip', () => {
+  assert.equal(normalizeNote('  **why**  '), '**why**', 'Markdown is kept verbatim');
+  assert.equal(normalizeNote('   '), '', 'an empty note is the documented tag-without-one');
+  assert.throws(() => normalizeNote(null), TypeError);
+  assert.throws(() => normalizeNote('x'.repeat(TAG_NOTE_MAX_LENGTH + 1)), TypeError);
+
+  const file = join(scratch(), 'state.json');
+  setTag(file, 'message-a', 'why this branch');
+  assert.equal(readState(file).tags['message-a'].note, 'why this branch');
+  assert.equal(typeof readState(file).tags['message-a'].time, 'number', 'a tag carries when it was put there');
+  clearTag(file, 'message-a');
+  assert.deepEqual(readState(file).tags, {}, 'taking it off removes the entry, not just the note');
+  clearTag(file, 'never-tagged');
+  assert.deepEqual(readState(file).tags, {}, 'clearing an absent tag is a no-op, not an error');
+});
+
+test('the route tags the turn a message belongs to, by message id', async () => {
+  const home = scratch();
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const request = harness();
+
+    let response = await request('POST', { action: 'tag', sessionId: 'source', messageId: 'a1', note: '  **why**  ' });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { ok: true, sessionId: 'source', messageId: 'a1', turn: 1 },
+      'the answer names the turn the message resolved to');
+
+    response = await request('GET');
+    assert.equal(response.body.messageTags.a1.note, '**why**', 'the chat action row reads its tag by message id');
+    assert.equal(response.body.versions[0].turns[0].tag.note, '**why**',
+      'and the tree reads the same tag off the turn it drew');
+
+    response = await request('POST', { action: 'tag', sessionId: 'source', messageId: 'not-in-this-session', note: '' });
+    assert.equal(response.status, 400, 'a message this session never wrote is refused, not stored');
+
+    response = await request('POST', { action: 'tag', sessionId: 'source', note: '' });
+    assert.equal(response.status, 400, 'a missing messageId is a bad request');
+
+    response = await request('POST', { action: 'untag', sessionId: 'source', messageId: 'a1' });
+    assert.equal(response.status, 200);
+    response = await request('GET');
+    assert.deepEqual(response.body.messageTags, {}, 'taking the tag off leaves nothing behind');
+    assert.equal(response.body.versions[0].turns[0].tag, undefined, 'and the turn stops advertising one');
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previous;
+  }
+});
+
