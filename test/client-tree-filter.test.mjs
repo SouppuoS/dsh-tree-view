@@ -705,6 +705,24 @@ test('a family with nothing worth folding draws no fold and no outline', async (
   assert.equal(view.outlineItems().length, 0, 'and a plain card opens no outline at all');
 });
 
+test('the outline shows the files the open turn produced, as names', async (t) => {
+  const line = Array.from({ length: 6 }, (_, i) => (i + 1 === 2
+    ? { turn: 2, text: 'write it', time: 2, files: ['/repo/src/alpha.ts', '/repo/src/beta.ts'] }
+    : { turn: i + 1, text: 'turn ' + (i + 1), time: i + 1 }));
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' },
+    [{ sessionId: 'session-root', createdAt: 1, current: true, turns: line }]);
+
+  await view.hoverCard(view.foldCard().getAttribute('data-id'));
+  const chips = () => [...view.dom.window.document.querySelectorAll('.mtx-outline-file')];
+  assert.equal(chips().length, 0, 'the first turn wrote nothing, so nothing is listed');
+
+  await view.hoverOutlineRow(2);
+  assert.deepEqual(chips().map((el) => el.textContent), ['alpha.ts', 'beta.ts'],
+    'the names are shown, not the whole path');
+  assert.equal(chips()[0].getAttribute('title'), '/repo/src/alpha.ts',
+    'and the full path is on hand for the curious');
+});
+
 test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions.open', async (t) => {
   // 0.1.7 moved "show this session in the main view" off the session controller
   // and onto the workspace service. The client used to require `sessions.open`

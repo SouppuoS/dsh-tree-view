@@ -734,6 +734,12 @@ function markdownLite(text) {
   return out;
 }
 
+/** The trailing path segment, which is what identifies a file at a glance. */
+function basenameOf(path) {
+  const at = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return at === -1 ? path : path.slice(at + 1);
+}
+
 function clip(text, max) {
   const t = String(text).replace(/\s+/g, ' ').trim();
   return t.length > max ? t.slice(0, max - 1) + '…' : t;
@@ -890,6 +896,7 @@ function buildTurnTree(versions, currentSessionId, options) {
           time: t.time || v.createdAt,
           text: t.text || '',
           tag: t.tag || undefined,
+          files: t.files || undefined,
           current: isCurrentSession,
           onCurrentPath: false,
           deleted: !!v.deleted,
@@ -948,6 +955,7 @@ function buildTurnTree(versions, currentSessionId, options) {
           text: t.text || (isForkTurn ? (v.after || v.before || '') : ''),
           time: t.time || v.createdAt,
           tag: t.tag || undefined,
+          files: t.files || undefined,
           current: isCurrentSession,
           onCurrentPath: false,
           deleted: !!v.deleted,
@@ -1354,8 +1362,12 @@ const CSS = [
   '.mtx-outline-info-head{display:flex;align-items:center;gap:7px;font-size:11.5px;line-height:15px;color:var(--dsw-alias-label-secondary,#bbb)}',
   '.mtx-outline-icon{flex:none;width:13px;text-align:center;font-size:11px}',
   '.mtx-outline-text{font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary,#eee);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}',
-  '.mtx-outline-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-tertiary,#888)}',
-  '.mtx-outline-item:hover .mtx-outline-text{color:var(--dsw-alias-label-primary,#eee)}',
+  // What a turn produced, as inline code chips: wrapped, capped at four with a
+  // count, and truncated by name so one long path cannot push the rest out.
+  '.mtx-outline-files{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:3px}',
+  '.mtx-outline-files-label{flex:none;font-size:10px;letter-spacing:.02em;color:var(--dsw-alias-label-tertiary,#888)}',
+  '.mtx-outline-file{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;line-height:15px;padding:1px 5px;border-radius:5px;max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:color-mix(in srgb,currentColor 12%,transparent);color:var(--dsw-alias-label-secondary,#bbb)}',
+  '.mtx-outline-more{font-size:10px;color:var(--dsw-alias-label-tertiary,#888)}',
   '.mtx-menu-item[disabled]{color:var(--dsw-alias-label-tertiary,#888);cursor:not-allowed}',
   '.mtx-rename{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;z-index:7}',
   '.mtx-rename-input{width:100%;box-sizing:border-box;font-family:inherit;font-size:12.5px;line-height:17px;padding:9px 11px;border-radius:13px;border:1px solid var(--mtx-accent);background:var(--mtx-surface);color:var(--dsw-alias-label-primary,#eee);outline:none;box-shadow:0 6px 22px var(--mtx-shadow-strong)}',
@@ -1570,6 +1582,7 @@ return {
         menuDemote: 'Collect into the tree',
         menuDemoteOpen: 'This is the conversation you have open',
         tagBadge: 'tag',
+        filesLabel: 'files',
         tagAdd: 'Tag this turn',
         tagRemove: 'Remove the tag',
         tagNotePlaceholder: 'Note (Markdown), optional',
@@ -1642,6 +1655,7 @@ return {
         menuDemote: '收到 Tree 里',
         menuDemoteOpen: '这就是你当前打开的会话',
         tagBadge: '标记',
+        filesLabel: '文件',
         tagAdd: '标记这一轮',
         tagRemove: '取消标记',
         tagNotePlaceholder: '备注（Markdown，可留空）',
@@ -2849,7 +2863,23 @@ return {
                   shown.isRoot ? '●' : (shown.operation === 'retry' ? '↻' : (shown.operation === 'edit' ? '✎' : '💬'))),
                 React.createElement('span', { className: 'mtx-outline-turn' }, t('turn', { turn: shown.turn }))
               ),
-              React.createElement('div', { className: 'mtx-outline-text' }, clip(shown.text || '', 180))
+              React.createElement('div', { className: 'mtx-outline-text' }, clip(shown.text || '', 180)),
+              // What the turn left behind, when it left anything: names only, as
+              // inline code, wrapped and capped. The rail is a map of the fold,
+              // not a directory listing.
+              shown.files && shown.files.length > 0 ? React.createElement('div', { className: 'mtx-outline-files' },
+                React.createElement('span', { className: 'mtx-outline-files-label' }, t('filesLabel')),
+                shown.files.slice(0, 4).map(function (file) {
+                  return React.createElement('code', {
+                    key: file,
+                    className: 'mtx-outline-file',
+                    title: file,
+                  }, basenameOf(file));
+                }),
+                shown.files.length > 4
+                  ? React.createElement('span', { className: 'mtx-outline-more' }, '+' + (shown.files.length - 4))
+                  : null
+              ) : null
             )
           );
         })(),
