@@ -1014,6 +1014,25 @@ function buildTurnTree(versions, currentSessionId, options) {
     }
   }
 
+  // Cross-session material: the payload records it per version, against the turn
+  // the message fed. One that arrived between turns and has not fed a turn yet —
+  // which is the normal case while the reader is still in that turn — hangs off
+  // the origin instead of being dropped.
+  for (let i = 0; i < versions.length; i++) {
+    const links = versions[i].incoming;
+    if (!Array.isArray(links)) continue;
+    for (let j = 0; j < links.length; j++) {
+      const link = links[j];
+      const fed = typeof link.feedsTurn === 'number'
+        ? nodeMap.get(versions[i].sessionId + '#t' + link.feedsTurn)
+        : undefined;
+      const host = fed || nodeMap.get(rootNodeId);
+      if (!host) continue;
+      if (host.incoming === undefined) host.incoming = [];
+      host.incoming.push(link);
+    }
+  }
+
   const activePathIds = new Set();
   let latestNode = null;
   for (let i = 0; i < nodes.length; i++) {
@@ -1086,9 +1105,11 @@ function foldLongRuns(nodes, minHidden) {
   function kidsOf(n) { return children.get(n.id) || []; }
   // A pass-through is a turn that neither decides anything nor is a landmark.
   function passThrough(n) {
-    // A tagged turn is a landmark the reader put there on purpose, so a fold
-    // must never swallow it — the same reason the latest turn is excluded.
-    return kidsOf(n).length === 1 && !n.isRoot && n.head !== true && n.tag === undefined;
+    // A tagged turn is a landmark the reader put there on purpose, and so is one
+    // that took material from another conversation, so a fold must never swallow
+    // either — the same reason the latest turn is excluded.
+    return kidsOf(n).length === 1 && !n.isRoot && n.head !== true
+      && n.tag === undefined && n.incoming === undefined;
   }
 
   const hiddenIds = new Set();
@@ -1289,6 +1310,11 @@ const CSS = [
   '.mtx-world{position:absolute;left:0;top:0}',
   '.mtx-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}',
   '.mtx-edge{fill:none;stroke:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 45%,transparent);stroke-width:1.5}',
+  // Cross-session references are drawn as dashed arrows: they are not lineage,
+  // they are material that travelled.
+  '.mtx-edge-ref{stroke-dasharray:4 4;stroke-width:1.4;opacity:.8}',
+  '.mtx-card-refs{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}',
+  '.mtx-card-ref{font-size:10px;line-height:14px;padding:1px 5px;border-radius:999px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mtx-accent);background:color-mix(in srgb,var(--mtx-accent) 12%,transparent)}',
   '.mtx-edge[data-path]{stroke:var(--mtx-accent);stroke-width:2}',
   '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--mtx-surface));box-shadow:0 2px 10px var(--mtx-shadow);cursor:pointer;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
   '.mtx-card:hover{box-shadow:0 6px 22px var(--mtx-shadow-strong);border-color:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent)}',
@@ -2147,6 +2173,26 @@ return {
         return n.id + ':' + (n.parentId || '') + ':' + (n.onCurrentPath ? 1 : 0);
       }).join('|');
       const layout = React.useMemo(function () { return layoutTurnTree(turnNodes); }, [layoutKey]);
+
+      // Cross-session references: an arrow from the version that sent the material
+      // to the turn that went on with it, drawn only when both ends are on the
+      // canvas. A sender that is not here cannot be pointed at, so it becomes a
+      // mark on the receiving card instead.
+      const refs = React.useMemo(function () {
+        const lastOfSession = new Map();
+        for (let i = 0; i < turnNodes.length; i++) lastOfSession.set(turnNodes[i].sessionId, turnNodes[i].id);
+        const edges = [];
+        for (let i = 0; i < turnNodes.length; i++) {
+          const incoming = turnNodes[i].incoming;
+          if (incoming === undefined) continue;
+          for (let j = 0; j < incoming.length; j++) {
+            const from = lastOfSession.get(incoming[j].senderSessionId);
+            if (from === undefined || from === turnNodes[i].id) continue;
+            edges.push({ key: 'ref:' + from + '>' + turnNodes[i].id, from: from, to: turnNodes[i].id });
+          }
+        }
+        return { edges: edges, sessions: new Set(turnNodes.map(function (n) { return n.sessionId; })) };
+      }, [layoutKey]);
       layoutRef.current = layout;
 
       // Named branches are drawn as groups, the way a node editor boxes a set of
@@ -2637,6 +2683,15 @@ return {
                 d: a && b ? edgePath(a.x, a.y + 58, b.x, b.y) : undefined,
                 ref: function (el) { if (el) edgeEls.current.set(key, el); else edgeEls.current.delete(key); },
               });
+            }),
+            refs.edges.map(function (e) {
+              const a = springs.current.get(e.from) || layout.pos.get(e.from);
+              const b = springs.current.get(e.to) || layout.pos.get(e.to);
+              return React.createElement('path', {
+                key: e.key,
+                className: 'mtx-edge mtx-edge-ref',
+                d: a && b ? edgePath(a.x, a.y + 58, b.x, b.y) : undefined,
+              });
             })
           ),
           // Cards render from turnNodes, the version data of THIS render, and
@@ -2708,7 +2763,20 @@ return {
                 // nothing else on the canvas says.
                 n.tag && n.tag.note
                   ? React.createElement('span', { className: 'mtx-card-note' }, markdownLite(n.tag.note))
-                  : null
+                  : null,
+                // Material that came from a conversation which is NOT on this
+                // canvas: there is nothing here to point an arrow at, so the turn
+                // says where it came from instead.
+                n.incoming ? React.createElement('span', { className: 'mtx-card-refs' },
+                  n.incoming.filter(function (link) { return !refs.sessions.has(link.senderSessionId); })
+                    .slice(0, 3).map(function (link) {
+                      return React.createElement('span', {
+                        key: 'ref-' + link.senderSessionId,
+                        className: 'mtx-card-ref',
+                        title: link.summary || link.senderSessionId,
+                      }, '⇠ ' + String(link.senderSessionId).slice(0, 8));
+                    })
+                ) : null
               ),
               n.fold ? React.createElement('span', { className: 'mtx-fold-cue' }, '⌄') : null,
               // The tag rides on the card's top edge: this conversation belongs to

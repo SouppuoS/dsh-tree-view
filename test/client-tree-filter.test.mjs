@@ -723,6 +723,36 @@ test('the outline shows the files the open turn produced, as names', async (t) =
     'and the full path is on hand for the curious');
 });
 
+test('a turn fed from outside the family says where the material came from', async (t) => {
+  const turns = Array.from({ length: 4 }, (_, i) => ({ turn: i + 1, text: 'turn ' + (i + 1), time: i + 1 }));
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, [{
+    sessionId: 'session-root', createdAt: 1, current: true, turns: turns,
+    incoming: [{ senderSessionId: 'child-outside-1234', kind: 'subagent-settled', summary: 'it settled', feedsTurn: 2 }],
+  }]);
+
+  const chips = [...view.dom.window.document.querySelectorAll('.mtx-card-ref')];
+  assert.equal(chips.length, 1, 'the sender is named on the turn it fed');
+  assert.equal(chips[0].textContent, '⇠ child-ou', 'by a short handle, not a wall of uuid');
+  assert.equal(chips[0].getAttribute('title'), 'it settled', 'with the runtime account on hand');
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-edge-ref').length, 0,
+    'and no arrow, because there is nothing on this canvas to point at');
+});
+
+test('material from a conversation on the canvas is drawn as a dashed arrow', async (t) => {
+  const rootTurns = Array.from({ length: 4 }, (_, i) => ({ turn: i + 1, text: 'root ' + (i + 1), time: i + 1 }));
+  const childTurns = Array.from({ length: 2 }, (_, i) => ({ turn: i + 1, text: 'child ' + (i + 1), time: 10 + i }));
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, [
+    { sessionId: 'session-root', createdAt: 1, current: true, turns: rootTurns,
+      incoming: [{ senderSessionId: 'session-child', kind: 'subagent-settled', summary: 'done', feedsTurn: 3 }] },
+    { sessionId: 'session-child', parentSessionId: 'session-root', createdAt: 2, subagent: true, forkTurn: 0, turns: childTurns },
+  ]);
+
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-edge-ref').length, 1,
+    'one dashed arrow, from the sender to the turn it fed');
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-card-ref').length, 0,
+    'and no chip, because the sender is already on the canvas');
+});
+
 test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions.open', async (t) => {
   // 0.1.7 moved "show this session in the main view" off the session controller
   // and onto the workspace service. The client used to require `sessions.open`
