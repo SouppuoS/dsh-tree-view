@@ -44,7 +44,7 @@ Switch the conversation panel to Tree and the whole family is drawn on one canva
 | 🎯 **Highlighted reading path** | The whole line you are reading — shared opening included — is highlighted on the canvas, so where you came from, where you are and where you can still go read off one picture. |
 | 📌 **Resume where you left off** | Coming back to this family from another conversation resumes the version you last read (off by default; switchable in Settings). |
 | 🤖 **Subagent tags** | A subagent session hanging under this conversation carries a tag, so it is not read as one of your versions. |
-| 🕸️ **Cross-session references** | When another conversation (a subagent, say) hands material in, the Tree draws a **dashed arrow** to the turn that went on with it; a sender that is not on the canvas becomes a `⇠ handle` mark on the receiving turn instead, with the runtime's account in its tooltip. The "References" control standing on the panel's left edge turns the whole layer off. |
+| 🕸️ **Cross-session references** | When another conversation (a subagent, say) hands material in, the Tree draws a **dashed arrow** to the turn that went on with it; a sender that is not on the canvas becomes a `⇠ handle` mark on the receiving turn instead, with the runtime's account in its tooltip. The icon control on the panel's left edge turns the whole layer off, and the turns that were held out of a fold only to anchor an arrow fold back in with it — a layer that is not drawn is no reason to hold the canvas open. The control carries no words; hovering it says "Show/Hide cross-session references". |
 | 📦 **Archived branches stay** | A version you archive is still drawn, dimmed and marked "archived" — archiving takes an entry out of the sidebar, it does not delete a branch. |
 | 🎨 **Following the theme** | Surface, border, accent, state and even shadow colours come from the host's theme tokens: light follows light, dark follows dark. |
 
@@ -164,7 +164,7 @@ Settings → **TreeView**, five rows, each described in the panel:
 | Open the version I was last reading | `off` | See "Resume where you left off". |
 | Stop the reply that is still being written | `on` | Stop every running reply in the same family (other versions included) before branching, saving quota — and letting you edit mid-reply. |
 | Hide forks with no new turns | `on` | See "Hiding empty forks". |
-| Fold long straight stretches | `2 turns and up` | `Never` / `2` / `5` / `8` / `12` / `20`, counted per run. A tagged turn and the one you are reading are never folded away — see "Folding". |
+| Fold long straight stretches | `2 turns and up` | `Never` / `2` / `5` / `8` / `12` / `20`, counted per run. A tagged turn, the one you are reading, and (while cross-session references are on) the one that took outside material in are never folded away — see "Folding". |
 
 ## For developers
 
