@@ -154,6 +154,11 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     el.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: deltaY, bubbles: true, cancelable: true }));
   });
   const outlineTurns = () => outlineItems().map((el) => Number(el.getAttribute('data-turn')));
+  const hoverOutlineRow = (turn) => act(async () => {
+    const item = outlineItems().find((el) => el.getAttribute('data-turn') === String(turn));
+    assert.ok(item, 'outline row for turn ' + turn + ' exists');
+    item.dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true }));
+  });
   const clickOutline = (turn) => act(async () => {
     const item = outlineItems().find((el) => el.getAttribute('data-turn') === String(turn));
     assert.ok(item, 'outline row for turn ' + turn + ' exists');
@@ -189,7 +194,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   };
   return {
     dom, cardIds, offsets, titles, links, clickCard, foldCard,
-    menuItems, openMenu, clickMenuItem, hoverCard, outlineItems, outlineTurns, clickOutline, worldScale, wheelOn,
+    menuItems, openMenu, clickMenuItem, hoverCard, outlineItems, outlineTurns, clickOutline, hoverOutlineRow, worldScale, wheelOn,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
     opened, workspaceOpened, tabClicks,
   };
@@ -422,6 +427,19 @@ test('a fold opens its outline on hover, and clicking it changes nothing', async
     'every hidden turn gets a rule');
   assert.equal(view.dom.window.document.querySelectorAll('.mtx-outline-detail').length, 14,
     'and the row behind each rule carries its turn');
+
+  // A rule says what it stands for only while the pointer is on it: the rail is
+  // a list of rules, not a list of paragraphs.
+  const rail = view.dom.window.document.querySelector('.mtx-outline');
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-outline-item[data-active]').length, 0,
+    'nothing is open before a rule is pointed at');
+  assert.equal(rail.hasAttribute('data-open'), false, 'so the rail stays compact');
+
+  await view.hoverOutlineRow(5);
+  const active = view.dom.window.document.querySelectorAll('.mtx-outline-item[data-active]');
+  assert.equal(active.length, 1, 'pointing at a rule opens exactly one row');
+  assert.equal(active[0].getAttribute('data-turn'), '5', 'and it is the one under the pointer');
+  assert.ok(rail.hasAttribute('data-open'), 'while the rail widens to make room for it');
 
   // It is placed in the panel's own coordinates rather than the canvas's, so it
   // does not travel with a pan or shrink with a zoom.

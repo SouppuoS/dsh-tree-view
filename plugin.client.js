@@ -1336,21 +1336,23 @@ const CSS = [
   '.mtx-menu-item:hover:not([disabled]){background:var(--dsw-alias-interactive-bg-hover,var(--mtx-line))}',
   // The fold outline: the branch menu's shape, but it lists turns and opens on
   // hover instead of on a right-click.
-  // The fold outline borrows the conversation view's turn rail: a narrow column
-  // of short rules, one per hidden turn, that widens on hover to reveal what each
-  // turn was. It lives in the panel's coordinates rather than the canvas's, so it
-  // keeps its size at any zoom.
-  '.mtx-outline{position:absolute;z-index:9;width:54px;max-height:300px;display:flex;flex-direction:column;border-radius:12px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 14px 38px var(--mtx-shadow-strong);overflow:hidden;transition:width .18s cubic-bezier(.2,.8,.2,1)}',
-  '.mtx-outline:hover{width:268px}',
-  '.mtx-outline-head{flex:none;padding:7px 10px;border-bottom:1px solid color-mix(in srgb,currentColor 14%,transparent);font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary,#bbb)}',
-  '.mtx-outline-list{overscroll-behavior:contain;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:3px}',
-  '.mtx-outline-item{display:flex;align-items:center;gap:10px;height:16px;padding:0;border:0;background:transparent;font-family:inherit;font-size:12px;line-height:16px;color:inherit;text-align:left;cursor:pointer}',
-  '.mtx-outline-bar{flex:none;width:26px;height:3px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 65%,transparent);transition:width .16s ease,background .16s ease}',
-  '.mtx-outline:hover .mtx-outline-bar{width:32px}',
-  '.mtx-outline-item:hover .mtx-outline-bar{width:44px;background:var(--mtx-accent)}',
-  '.mtx-outline-detail{flex:1;min-width:0;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}',
-  '.mtx-outline-icon{flex:none;width:14px;text-align:center;color:var(--dsw-alias-label-tertiary,#888)}',
+  // The fold outline borrows the conversation view's turn rail: a compact column
+  // of short rules, one per hidden turn. No frame, no scrollbar, and only the
+  // rule the pointer is on says what turn it stands for — the rest stay rules.
+  // It lives in the panel's coordinates rather than the canvas's, so it keeps its
+  // size at any zoom.
+  '.mtx-outline{position:absolute;z-index:9;width:42px;max-height:300px;display:flex;flex-direction:column;border-radius:14px;background:color-mix(in srgb,var(--mtx-surface) 93%,transparent);backdrop-filter:blur(14px);box-shadow:0 16px 40px var(--mtx-shadow-strong),0 2px 6px var(--mtx-shadow);overflow:hidden;transition:width .2s cubic-bezier(.2,.8,.2,1)}',
+  '.mtx-outline[data-open]{width:266px}',
+  '.mtx-outline-list{overscroll-behavior:contain;overflow-y:auto;padding:8px 7px;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
+  '.mtx-outline-list::-webkit-scrollbar{display:none}',
+  '.mtx-outline-item{display:flex;align-items:center;gap:10px;height:14px;padding:0;border:0;background:transparent;font-family:inherit;font-size:11.5px;line-height:14px;color:inherit;text-align:left;cursor:pointer}',
+  '.mtx-outline-bar{flex:none;width:22px;height:2.5px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 58%,transparent);transition:width .16s ease,background .16s ease}',
+  '.mtx-outline-item[data-active] .mtx-outline-bar{width:30px;background:var(--mtx-accent)}',
+  '.mtx-outline-detail{display:none;flex:1;min-width:0;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}',
+  '.mtx-outline-item[data-active] .mtx-outline-detail{display:flex}',
+  '.mtx-outline-icon{flex:none;width:13px;text-align:center;font-size:11px;color:var(--dsw-alias-label-tertiary,#888)}',
   '.mtx-outline-turn{flex:none;color:var(--dsw-alias-label-secondary,#bbb)}',
+  '.mtx-outline-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-primary,#eee)}',
   '.mtx-outline-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-tertiary,#888)}',
   '.mtx-outline-item:hover .mtx-outline-text{color:var(--dsw-alias-label-primary,#eee)}',
   '.mtx-menu-item[disabled]{color:var(--dsw-alias-label-tertiary,#888);cursor:not-allowed}',
@@ -2069,6 +2071,12 @@ return {
       const foldHover = foldHoverState[0];
       const setFoldHover = foldHoverState[1];
       const foldHoverTimer = React.useRef(null);
+      // Which rule the pointer is on. One at a time, and only that one says what
+      // turn it stands for: the panel stays a compact rail until a rule is
+      // pointed at, instead of opening every row at once.
+      const outlineRowState = React.useState(null);
+      const outlineRow = outlineRowState[0];
+      const setOutlineRow = outlineRowState[1];
       // The outline is drawn in the panel's own coordinates, not the canvas's, so
       // it keeps its size at any zoom and can sit beside the pointer that opened
       // it. x/y are that pointer's position inside the graph, which is what a
@@ -2803,16 +2811,16 @@ return {
           return React.createElement('div', {
             className: 'mtx-outline',
             key: 'fold-outline',
+            'data-open': outlineRow === null ? undefined : '',
             style: {
               left: left + 'px',
               top: top + 'px',
               maxWidth: Math.max(140, Math.min(openW, boxW - left - 12)) + 'px',
             },
             onMouseEnter: foldOutlineHold,
-            onMouseLeave: foldOutlineLeave,
+            onMouseLeave: function () { setOutlineRow(null); foldOutlineLeave(); },
             onPointerDown: function (ev) { ev.stopPropagation(); },
           },
-            React.createElement('div', { className: 'mtx-outline-head' }, cardTitle(hovered)),
             React.createElement('div', { className: 'mtx-outline-list' },
               hovered.foldNodes.map(function (hidden) {
                 return React.createElement('button', {
@@ -2820,7 +2828,9 @@ return {
                   type: 'button',
                   className: 'mtx-outline-item',
                   'data-turn': hidden.turn,
+                  'data-active': outlineRow === hidden.turn ? '' : undefined,
                   title: clip(hidden.text || '', 120),
+                  onMouseEnter: function () { setOutlineRow(hidden.turn); },
                   onClick: function (ev) {
                     ev.stopPropagation();
                     setFoldHover(null);
