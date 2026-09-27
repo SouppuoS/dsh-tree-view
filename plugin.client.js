@@ -1340,8 +1340,11 @@ const CSS = [
   // of rules, one per hidden turn, with no surface of its own — no frame, no
   // background, no scrollbar. Only the open rule is marked, and what it stands
   // for is stated in a block beside the rail rather than beside that rule.
-  '.mtx-outline{position:absolute;z-index:9;display:flex;align-items:flex-start;gap:12px;max-height:300px;background:transparent}',
-  '.mtx-outline-list{flex:none;width:26px;max-height:300px;overscroll-behavior:contain;overflow-y:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
+  // A faint scrim, not a card: enough surface for the rules and the block beside
+  // them to stay legible over whatever the canvas is showing, without a frame or
+  // a hard edge. No border, and the list still hides its scrollbar.
+  '.mtx-outline{position:absolute;z-index:9;display:flex;align-items:flex-start;gap:12px;max-height:300px;padding:8px 10px;border-radius:12px;background:color-mix(in srgb,var(--mtx-surface) 62%,transparent);backdrop-filter:blur(12px);box-shadow:0 10px 28px var(--mtx-shadow);overflow:hidden}',
+  '.mtx-outline-list{flex:none;width:26px;max-height:282px;overscroll-behavior:contain;overflow-y:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
   '.mtx-outline-list::-webkit-scrollbar{display:none}',
   '.mtx-outline-item{display:flex;align-items:center;height:9px;padding:0;border:0;background:transparent;cursor:pointer}',
   '.mtx-outline-bar{width:16px;height:2px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);transition:width .15s ease,background .15s ease}',
