@@ -96,6 +96,24 @@ function harness() {
   // A tag is written from the action row, which names the turn's FINAL
   // assistant message — so the fixture has to carry one for the id to resolve.
   append('assistant/message', { message: { id: 'a1', role: 'assistant', source: { kind: 'model', provider: 'qa', model: 'qa' }, content: [{ type: 'text', text: 'answer' }] } });
+  // File mutations of the turn. Only successful, file-MUTATING calls count:
+  // the second write of a.ts is the same file, b.ts failed, and a `view` of c.ts
+  // changes nothing.
+  const call = (callId, name, args) => append('tool/call', { turn: 1, step: 1, callId, name, arguments: JSON.stringify(args) });
+  const result = (callId, isError) => append('tool/result', {
+    turn: 1, step: 1,
+    message: { id: 'r-' + callId, role: 'user', source: { kind: 'tool', callId }, content: [{ type: 'tool-result', toolCallId: callId, isError, content: [] }] },
+  });
+  call('c1', 'write', { file_path: '/repo/src/a.ts', content: 'x' });
+  result('c1', false);
+  call('c2', 'write', { file_path: '/repo/src/a.ts', content: 'y' });
+  result('c2', false);
+  call('c3', 'write', { file_path: '/repo/src/b.ts', content: 'z' });
+  result('c3', true);
+  call('c4', 'str_replace_editor', { command: 'view', path: '/repo/src/c.ts' });
+  result('c4', false);
+  call('c5', 'edit', { file_path: '/repo/src/d.ts', old_string: 'a', new_string: 'b' });
+  result('c5', false);
   append('turn/end', { turn: 1 });
 
   const registry = {
@@ -193,6 +211,20 @@ test('a note is trimmed and bounded, and a tag survives the round trip', () => {
   assert.deepEqual(readState(file).tags, {}, 'taking it off removes the entry, not just the note');
   clearTag(file, 'never-tagged');
   assert.deepEqual(readState(file).tags, {}, 'clearing an absent tag is a no-op, not an error');
+});
+
+test('a turn carries the files it produced, and only the ones it really wrote', async () => {
+  const home = scratch();
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const response = await harness()('GET');
+    assert.deepEqual(response.body.versions[0].turns[0].files, ['/repo/src/a.ts', '/repo/src/d.ts'],
+      'successful mutations, first-seen order, one entry per file, reads excluded');
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previous;
+  }
 });
 
 test('the route tags the turn a message belongs to, by message id', async () => {
