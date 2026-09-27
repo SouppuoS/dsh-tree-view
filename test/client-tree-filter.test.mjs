@@ -143,6 +143,16 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     el.dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true }));
   });
   const outlineItems = () => [...dom.window.document.querySelectorAll('.mtx-outline-item')];
+  const worldScale = () => {
+    const world = dom.window.document.querySelector('.mtx-world');
+    const m = world && /scale\(([\d.]+)\)/.exec(world.style.transform || '');
+    return m ? Number(m[1]) : null;
+  };
+  const wheelOn = (selector, deltaY) => act(async () => {
+    const el = dom.window.document.querySelector(selector);
+    assert.ok(el, 'element ' + selector + ' exists');
+    el.dispatchEvent(new dom.window.WheelEvent('wheel', { deltaY: deltaY, bubbles: true, cancelable: true }));
+  });
   const outlineTurns = () => outlineItems().map((el) => Number(el.getAttribute('data-turn')));
   const clickOutline = (turn) => act(async () => {
     const item = outlineItems().find((el) => el.getAttribute('data-turn') === String(turn));
@@ -179,7 +189,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   };
   return {
     dom, cardIds, offsets, titles, links, clickCard, foldCard,
-    menuItems, openMenu, clickMenuItem, hoverCard, outlineItems, outlineTurns, clickOutline,
+    menuItems, openMenu, clickMenuItem, hoverCard, outlineItems, outlineTurns, clickOutline, worldScale, wheelOn,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
     opened, workspaceOpened, tabClicks,
   };
@@ -405,6 +415,28 @@ test('a fold opens its outline on hover, and clicking it changes nothing', async
   await view.hoverCard(foldId);
   assert.deepEqual(view.outlineTurns(), Array.from({ length: 14 }, (_, i) => i + 1),
     'hovering lists the turns it hides, in order');
+
+  // The rail is the conversation view's shape: one short rule per hidden turn,
+  // which widens on hover to reveal what that turn was.
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-outline-bar').length, 14,
+    'every hidden turn gets a rule');
+  assert.equal(view.dom.window.document.querySelectorAll('.mtx-outline-detail').length, 14,
+    'and the row behind each rule carries its turn');
+
+  // It is placed in the panel's own coordinates rather than the canvas's, so it
+  // does not travel with a pan or shrink with a zoom.
+  const outline = view.dom.window.document.querySelector('.mtx-outline');
+  assert.ok(outline.style.left, 'the outline is placed beside the pointer: ' + outline.style.left);
+  assert.equal(outline.style.transform, '', 'and not by the canvas transform');
+
+  // A wheel over the outline belongs to the outline. It used to bubble to the
+  // canvas and zoom the tree out from under the reader.
+  const before = view.worldScale();
+  await view.wheelOn('.mtx-outline', 240);
+  assert.equal(view.worldScale(), before, 'scrolling the outline must not zoom the canvas');
+
+  await view.wheelOn('.mtx-graph', 240);
+  assert.notEqual(view.worldScale(), before, 'while a wheel on the canvas still zooms it');
 
   // Picking a row reaches that turn. It belongs to the version already on screen,
   // so the panel only sends the chat there rather than switching anything.

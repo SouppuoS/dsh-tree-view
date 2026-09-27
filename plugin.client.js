@@ -1336,14 +1336,23 @@ const CSS = [
   '.mtx-menu-item:hover:not([disabled]){background:var(--dsw-alias-interactive-bg-hover,var(--mtx-line))}',
   // The fold outline: the branch menu's shape, but it lists turns and opens on
   // hover instead of on a right-click.
-  '.mtx-outline{position:absolute;left:0;top:0;z-index:8;width:262px;max-height:320px;display:flex;flex-direction:column;border-radius:12px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 14px 38px var(--mtx-shadow-strong);overflow:hidden}',
-  '.mtx-outline-head{padding:8px 10px;border-bottom:1px solid color-mix(in srgb,currentColor 14%,transparent);font-size:11.5px;font-weight:600;color:var(--dsw-alias-label-secondary,#bbb)}',
-  '.mtx-outline-list{overflow-y:auto;padding:4px;display:flex;flex-direction:column;gap:2px}',
-  '.mtx-outline-item{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;appearance:none;border:0;background:transparent;text-align:left;font-family:inherit;font-size:12px;line-height:16px;padding:6px 8px;border-radius:8px;color:var(--dsw-alias-label-primary,#eee);cursor:pointer}',
-  '.mtx-outline-item:hover{background:var(--dsw-alias-interactive-bg-hover,var(--mtx-line))}',
+  // The fold outline borrows the conversation view's turn rail: a narrow column
+  // of short rules, one per hidden turn, that widens on hover to reveal what each
+  // turn was. It lives in the panel's coordinates rather than the canvas's, so it
+  // keeps its size at any zoom.
+  '.mtx-outline{position:absolute;z-index:9;width:54px;max-height:300px;display:flex;flex-direction:column;border-radius:12px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 14px 38px var(--mtx-shadow-strong);overflow:hidden;transition:width .18s cubic-bezier(.2,.8,.2,1)}',
+  '.mtx-outline:hover{width:268px}',
+  '.mtx-outline-head{flex:none;padding:7px 10px;border-bottom:1px solid color-mix(in srgb,currentColor 14%,transparent);font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-secondary,#bbb)}',
+  '.mtx-outline-list{overscroll-behavior:contain;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:3px}',
+  '.mtx-outline-item{display:flex;align-items:center;gap:10px;height:16px;padding:0;border:0;background:transparent;font-family:inherit;font-size:12px;line-height:16px;color:inherit;text-align:left;cursor:pointer}',
+  '.mtx-outline-bar{flex:none;width:26px;height:3px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 65%,transparent);transition:width .16s ease,background .16s ease}',
+  '.mtx-outline:hover .mtx-outline-bar{width:32px}',
+  '.mtx-outline-item:hover .mtx-outline-bar{width:44px;background:var(--mtx-accent)}',
+  '.mtx-outline-detail{flex:1;min-width:0;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}',
   '.mtx-outline-icon{flex:none;width:14px;text-align:center;color:var(--dsw-alias-label-tertiary,#888)}',
   '.mtx-outline-turn{flex:none;color:var(--dsw-alias-label-secondary,#bbb)}',
-  '.mtx-outline-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#888)}',
+  '.mtx-outline-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-tertiary,#888)}',
+  '.mtx-outline-item:hover .mtx-outline-text{color:var(--dsw-alias-label-primary,#eee)}',
   '.mtx-menu-item[disabled]{color:var(--dsw-alias-label-tertiary,#888);cursor:not-allowed}',
   '.mtx-rename{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;z-index:7}',
   '.mtx-rename-input{width:100%;box-sizing:border-box;font-family:inherit;font-size:12.5px;line-height:17px;padding:9px 11px;border-radius:13px;border:1px solid var(--mtx-accent);background:var(--mtx-surface);color:var(--dsw-alias-label-primary,#eee);outline:none;box-shadow:0 6px 22px var(--mtx-shadow-strong)}',
@@ -2060,9 +2069,18 @@ return {
       const foldHover = foldHoverState[0];
       const setFoldHover = foldHoverState[1];
       const foldHoverTimer = React.useRef(null);
-      function foldOutlineEnter(id) {
+      // The outline is drawn in the panel's own coordinates, not the canvas's, so
+      // it keeps its size at any zoom and can sit beside the pointer that opened
+      // it. x/y are that pointer's position inside the graph, which is what a
+      // screen-space box needs.
+      function foldOutlineEnter(id, x, y) {
         if (foldHoverTimer.current) { clearTimeout(foldHoverTimer.current); foldHoverTimer.current = null; }
-        setFoldHover(id);
+        setFoldHover({ id: id, x: x, y: y });
+      }
+      // Travelling from the card into the panel must not re-place it under the
+      // pointer, so entering the panel only cancels the pending close.
+      function foldOutlineHold() {
+        if (foldHoverTimer.current) { clearTimeout(foldHoverTimer.current); foldHoverTimer.current = null; }
       }
       function foldOutlineLeave() {
         if (foldHoverTimer.current) clearTimeout(foldHoverTimer.current);
@@ -2303,6 +2321,10 @@ return {
         const el = graphRef.current;
         if (!el) return undefined;
         const onWheel = function (ev) {
+          // A wheel inside the fold outline belongs to the outline. Without this
+          // it bubbled here and zoomed the canvas while the reader was only
+          // trying to scroll the list.
+          if (ev.target && ev.target.closest && ev.target.closest('.mtx-outline')) return;
           ev.preventDefault();
           const view = viewRef.current;
           const rect = el.getBoundingClientRect();
@@ -2635,7 +2657,12 @@ return {
               'data-tag': n.tag ? '' : undefined,
               title: n.deleted ? undefined : (n.fold ? t('foldOutlineHint') : t('menuHint')),
               // Only a fold has an outline; every other card behaves as before.
-              onMouseEnter: n.fold ? function () { foldOutlineEnter(n.id); } : undefined,
+              onMouseEnter: n.fold ? function (ev) {
+                const el = graphRef.current;
+                if (!el) return;
+                const rect = el.getBoundingClientRect();
+                foldOutlineEnter(n.id, ev.clientX - rect.left, ev.clientY - rect.top);
+              } : undefined,
               onMouseLeave: n.fold ? foldOutlineLeave : undefined,
               onContextMenu: function (ev) {
                 ev.preventDefault();
@@ -2758,18 +2785,30 @@ return {
             );
           })()
         ),
-        // What a fold hides, listed where the fold is. This is why the canvas no
-        // longer unfolds in place: the outline answers "what is in there" and
-        // "take me to that turn" without redrawing a hundred cards.
+        // What a fold hides, drawn beside the pointer that opened it. The panel
+        // lives in the graph's own coordinates rather than the canvas's, so it
+        // keeps its size at any zoom, its list scrolls like any other list, and
+        // the canvas underneath is none the wiser.
         foldHover === null ? null : (function () {
-          const hovered = turnNodes.find(function (n) { return n.id === foldHover; });
+          const hovered = turnNodes.find(function (n) { return n.id === foldHover.id; });
           if (!hovered || !hovered.foldNodes || hovered.foldNodes.length === 0) return null;
-          const s = springs.current.get(hovered.id) || layout.pos.get(hovered.id) || { x: 0, y: 0 };
+          const el = graphRef.current;
+          const boxW = el ? el.clientWidth : 640;
+          const boxH = el ? el.clientHeight : 420;
+          const openW = 268;
+          // Beside the pointer, but never off the panel. The room it needs is the
+          // OPEN width, because hovering the rail widens it.
+          const left = Math.max(8, Math.min(foldHover.x + 16, Math.max(8, boxW - openW - 12)));
+          const top = Math.max(8, Math.min(foldHover.y - 22, Math.max(8, boxH - 240)));
           return React.createElement('div', {
             className: 'mtx-outline',
             key: 'fold-outline',
-            style: { transform: 'translate(' + (s.x + CARD_W / 2 + 6) + 'px,' + s.y + 'px)' },
-            onMouseEnter: function () { foldOutlineEnter(hovered.id); },
+            style: {
+              left: left + 'px',
+              top: top + 'px',
+              maxWidth: Math.max(140, Math.min(openW, boxW - left - 12)) + 'px',
+            },
+            onMouseEnter: foldOutlineHold,
             onMouseLeave: foldOutlineLeave,
             onPointerDown: function (ev) { ev.stopPropagation(); },
           },
@@ -2781,16 +2820,23 @@ return {
                   type: 'button',
                   className: 'mtx-outline-item',
                   'data-turn': hidden.turn,
+                  title: clip(hidden.text || '', 120),
                   onClick: function (ev) {
                     ev.stopPropagation();
                     setFoldHover(null);
                     openVersion(hidden.id);
                   },
                 },
-                  React.createElement('span', { className: 'mtx-outline-icon' },
-                    hidden.isRoot ? '●' : (hidden.operation === 'retry' ? '↻' : (hidden.operation === 'edit' ? '✎' : '💬'))),
-                  React.createElement('span', { className: 'mtx-outline-turn' }, t('turn', { turn: hidden.turn })),
-                  React.createElement('span', { className: 'mtx-outline-text' }, clip(hidden.text || '', 60))
+                  // The rule IS the affordance, one per hidden turn, the way the
+                  // conversation view's own rail marks every turn. Hovering the
+                  // rail widens it and the row reveals what that turn was.
+                  React.createElement('span', { className: 'mtx-outline-bar' }),
+                  React.createElement('span', { className: 'mtx-outline-detail' },
+                    React.createElement('span', { className: 'mtx-outline-icon' },
+                      hidden.isRoot ? '●' : (hidden.operation === 'retry' ? '↻' : (hidden.operation === 'edit' ? '✎' : '💬'))),
+                    React.createElement('span', { className: 'mtx-outline-turn' }, t('turn', { turn: hidden.turn })),
+                    React.createElement('span', { className: 'mtx-outline-text' }, clip(hidden.text || '', 60))
+                  )
                 );
               })
             )
