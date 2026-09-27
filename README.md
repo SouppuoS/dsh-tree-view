@@ -188,9 +188,12 @@ lib/tree-logic.js       树构建与布局（纯函数，宿主与客户端共�
 lib/tree-state.js       分支名与归档归属的 sidecar
 lib/session-record.js   把各版本的会话记录读成同一种形状
 lib/archive-adapter.js  唯一与宿主归档强耦合的地方
-plugin.client.js        客户端半边（源）
-lib/client.js           客户端半边（产物，scripts/build-client.mjs 打包）
-test/                   16 个行为级测试文件
+lib/git-state.js        读 .git 定位 HEAD 提交（打标记时用）
+lib/client.js           客户端半边（产物，scripts/build-client.mjs 打包，已 gitignore）
+src/client.js           客户端半边（源）
+test/host/              宿主半边：9 个行为级测试文件
+test/client/            客户端半边：10 个（jsdom 加载 lib/client.js）
+test/fixtures/          离线 QA 夹具
 docs/                   架构 / 树数据模型 / 开发
 ```
 

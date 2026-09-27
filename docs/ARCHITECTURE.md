@@ -14,7 +14,7 @@ Because DSH session event logs are append-only without native in-session branchi
 │                                                             │
 │  ┌──────────────────────┐         ┌──────────────────────┐  │
 │  │     Client Half      │  HTTP   │      Host Half       │  │
-│  │  (plugin.client.js)  │<───────>│    (lib/index.js)    │  │
+│  │   (src/client.js)    │<───────>│    (lib/index.js)    │  │
 │  └──────────┬───────────┘         └──────────┬───────────┘  │
 │             │                                │              │
 │    Shadow User Message              Cordis Services:        │
@@ -50,12 +50,17 @@ Because DSH session event logs are append-only without native in-session branchi
   3. Creates the agent and clears both inherited inbox queues in its setup,
      before publication can schedule the rewound original input.
   4. Flushes the branch and submits the edited prompt exactly once.
+- Owns the reader's own state: branch labels, collected versions, and turn tags
+  live in a sidecar (`lib/tree-state.js`), never in the session log, so the log
+  stays exactly what the host wrote. A tag also records where the code stood —
+  `lib/git-state.js` reads each repository's `.git` directly (loose ref, packed
+  ref, detached HEAD, `gitdir:` pointer) and stores the commit at tagging time.
 - Owns graph queries (`GET /tree-view?sessionId=...`):
   - Traverses the session family DAG.
   - Recovers deleted/ghost ancestors from surviving descendants' event logs.
   - Extracts turn event boundaries for turn-level rendering.
 
-### 1.2 Client Half (`plugin.client.js`)
+### 1.2 Client Half (`src/client.js`)
 - Runs in the browser / renderer process.
 - Injects a shadowed `user` message renderer at priority `-1` to add the edit/copy/retry toolbar and `‹ n/m ›` version ring without modifying agent responses, tool calls, or reasoning blocks.
 - Adds the **Versions** tab (`VIEW_ORDER: 16`) providing an interactive pan/zoom graph with spring physics.

@@ -187,9 +187,12 @@ lib/tree-logic.js       tree building and layout (pure, shared by host and clien
 lib/tree-state.js       sidecar for branch names and archive ownership
 lib/session-record.js   reads every version's record into one shape
 lib/archive-adapter.js  the only hard coupling to host archiving
-plugin.client.js        client half (source)
-lib/client.js           client half (bundle, built by scripts/build-client.mjs)
-test/                   16 behavioural test files
+lib/git-state.js        reads .git for each repository's HEAD commit (taken when tagging)
+lib/client.js           client half (bundle, built from src/client.js by scripts/build-client.mjs; gitignored)
+src/client.js           client half (source)
+test/host/              9 behavioural test files for the host half
+test/client/            10 for the client half, loaded in jsdom
+test/fixtures/          offline QA fixtures
 docs/                   architecture / tree data model / development
 ```
 

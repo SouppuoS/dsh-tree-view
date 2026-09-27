@@ -8,19 +8,24 @@ This guide covers building, testing, packaging, and installing `dsh-tree-view`.
 
 ```
 dsh-tree-view/
-├── lib/
+├── lib/                   # everything DSH loads: the host half, plus the built bundle
 │   ├── index.js           # Host-side Cordis plugin (routes, session log processing)
 │   ├── tree-logic.js      # Pure tree algorithms (shared with client and tests)
 │   ├── session-record.js  # Reads every session shape into one record
 │   ├── tree-state.js      # Sidecar store: branch labels and collected versions
+│   ├── git-state.js       # Reads .git directly for each repository's HEAD commit
 │   ├── archive-adapter.js # The one place coupled to the host's archive state
-│   └── client.js          # Generated client bundle (wrapped from plugin.client.js)
-├── plugin.client.js       # Source client-side UI and React components
+│   └── client.js          # Generated bundle, built from src/client.js (gitignored)
+├── src/
+│   └── client.js          # Source client-side UI and React components
 ├── scripts/
-│   ├── build-client.mjs   # Build script wrapping plugin.client.js into lib/client.js
+│   ├── build-client.mjs   # Build script wrapping src/client.js into lib/client.js
 │   ├── check-package.mjs  # Packs the plugin and verifies the tarball
 │   └── …                  # QA fixture and the DSH acceptance runners
-├── test/                  # 18 behaviour-level test files (node:test)
+├── test/
+│   ├── host/              # 9 behaviour-level test files for lib/ (node:test)
+│   ├── client/            # 10 for src/client.js, loaded in jsdom (node:test)
+│   └── fixtures/          # Offline QA resolver and session fixture
 ├── .github/
 │   ├── workflows/ci.yml   # Regression suite, package check, official-host acceptance
 │   └── release-notes/     # One file per release; upstream's are named upstream-*
@@ -29,11 +34,15 @@ dsh-tree-view/
 └── package.json
 ```
 
+Only two directories matter when you are changing behaviour: `lib/` (the host
+half) and `src/client.js` (the client half). `lib/client.js` is generated —
+editing it is pointless, the next build overwrites it.
+
 ---
 
 ## 2. Build Pipeline
 
-The client component [`plugin.client.js`](../plugin.client.js) is written in browser-compatible JavaScript. Before distribution or testing, it is wrapped with a Cordis module preamble into [`lib/client.js`](../lib/client.js).
+The client component [`src/client.js`](../src/client.js) is written in browser-compatible JavaScript. Before distribution or testing, it is wrapped with a Cordis module preamble into [`lib/client.js`](../lib/client.js).
 
 ### Build Client
 ```bash
@@ -43,9 +52,17 @@ Executes `node scripts/build-client.mjs` to regenerate `lib/client.js`.
 
 ### Check Build Integrity
 ```bash
-node scripts/build-client.mjs --check
+npm run check:client
 ```
-Exits with code 1 if `lib/client.js` is out of date relative to `plugin.client.js`.
+Exits with code 1 if `lib/client.js` is out of date relative to `src/client.js`, or
+missing altogether — it is gitignored, so a fresh checkout has none.
+
+This is the guard to run after editing the source *without* building. It is
+deliberately not part of `npm test`: `pretest` regenerates the bundle, so a check
+that ran afterwards would always pass and catch nothing.
+
+`package.json` also carries `prepare`, so a `git`/folder install builds the
+client the same way `prepack` does for a published tarball.
 
 ---
 
@@ -56,19 +73,23 @@ The project includes an automated test suite verifying tree construction, siblin
 ```bash
 npm test
 ```
-Automatically builds the client first, checks that it matches the source, then
-runs the Node test runner. Install development dependencies with `npm ci` on a
+Builds the client first, then runs the Node test runner over both directories. Install development dependencies with `npm ci` on a
 fresh checkout before running tests (Node 22.19+ or Node 24).
 
-- `test/tree.test.mjs`: branch construction, sibling fan-out, ghost recovery,
-  active-path and ring-index behaviour (custom runner; prints `all passed`).
-- `test/client-*.test.mjs`: the client half through its module loader — tree
-  filtering and folding, the re-frame after a fold, subagent marks, host theme
-  tokens, image delegation, settings, and that a zoomed canvas is not left
-  behind as a stretched GPU layer.
-- `test/session-record.test.mjs`, `test/host-compatibility.test.mjs` and
-  `test/tree-payload.test.mjs`: legacy and current session shapes, live and
-  resumed edit requests, retained images, retry ancestry, nested version
+The files are grouped by the half they cover: `test/host/` loads the modules in
+`lib/` directly, `test/client/` loads the built bundle in jsdom through the same
+module loader the browser uses.
+
+- `test/host/tree.test.mjs`: branch construction, sibling fan-out, ghost
+  recovery, active-path and ring-index behaviour (custom runner; prints
+  `all passed`).
+- `test/client/`: the client half — tree filtering and folding, the re-frame
+  after a fold, subagent marks, tag notes, host theme tokens, image delegation,
+  settings, and that a zoomed canvas is not left behind as a stretched GPU
+  layer.
+- `test/host/session-record.test.mjs`, `test/host/host-compatibility.test.mjs`
+  and `test/host/tree-payload.test.mjs`: legacy and current session shapes, live
+  and resumed edit requests, retained images, retry ancestry, nested version
   markers, cache invalidation, and the payload the tree view serves.
 
 GitHub Actions runs these checks for pull requests and branch pushes, on
@@ -94,7 +115,8 @@ the native viewer, enter/cancel an edit, then verify the original attachments
 survive an edit submission. CI's gallery double cannot verify native image
 loading, lightbox behavior, or compatibility with DSH's module injection.
 
-To add a test, drop a `test/*.test.mjs` file: `npm test` runs the whole directory.
+To add a test, drop a `*.test.mjs` file into `test/host/` or `test/client/`:
+the `test` script runs both directories.
 
 ### Optional real DSH acceptance
 
@@ -173,7 +195,7 @@ Two rules keep a host change from taking the plugin offline:
   deselects a client plugin whose boot never finishes. That is exactly what
   happened on 0.1.7: it moved "show this session" from `sessions.open` to
   `uiWorkspace.openSession`, an old client threw during `apply`, and the plugin
-  disappeared from the app. `sessionNavigator` in `plugin.client.js` now knows
+  disappeared from the app. `sessionNavigator` in `src/client.js` now knows
   both generations.
 - **Host coupling lives in adapters.** `lib/archive-adapter.js` probes
   capabilities instead of version-gating, and the client reads the subagent
@@ -182,7 +204,7 @@ Two rules keep a host change from taking the plugin offline:
 
 Release checklist:
 
-1. `npm test` — builds the client, checks it against the source, runs every file.
+1. `npm test` — builds the client, then runs every test file.
 2. `npm run check:package` — packs for real, verifies the tarball's contents.
 3. CI green on the pushed commit, `official-host` included.
 4. Bump `version` in `package.json`, and describe the release in
