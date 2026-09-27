@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -78,9 +78,16 @@ test('names and memberships are written independently', () => {
 
 // The route is the only surface the client uses, so the moves are exercised
 // through it: name a version, take it out of the main conversation, put it back.
-function harness() {
+/** A repository with no git binary involved: HEAD plus one loose ref. */
+function fakeRepo(root, branch, sha) {
+  mkdirSync(join(root, '.git', 'refs', 'heads'), { recursive: true });
+  writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/' + branch + '\n');
+  writeFileSync(join(root, '.git', 'refs', 'heads', branch), sha + '\n');
+}
+
+function harness(workspace) {
   const events = [];
-  const header = { id: 'source', createdAt: 1, cwd: '/qa', isSeeded: false };
+  const header = { id: 'source', createdAt: 1, cwd: workspace ?? '/qa', isSeeded: false };
   const session = {
     id: 'source',
     header,
@@ -258,6 +265,28 @@ test('a session fed by another one records where the material came from', async 
   }
 });
 
+test('a tag records the commit every repository was on', async () => {
+  const home = scratch();
+  const workspace = scratch();
+  fakeRepo(workspace, 'main', 'a'.repeat(40));
+  fakeRepo(join(workspace, 'packages', 'inner'), 'dev', 'b'.repeat(40));
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const response = await harness(workspace)('POST', { action: 'tag', sessionId: 'source', messageId: 'a1', note: '' });
+    assert.equal(response.body.repos, 2, 'both repositories are recorded');
+    const repos = readState(stateFilePath(home)).tags.a1.repos;
+    assert.deepEqual(repos.map((repo) => repo.path), ['.', 'packages/inner'], 'the root first, then the nested one');
+    assert.equal(repos[0].head, 'a'.repeat(40), 'with the commit the root was on');
+    assert.equal(repos[0].branch, 'main');
+    assert.equal(repos[1].head, 'b'.repeat(40), 'and the nested one, which may be on another branch');
+    assert.equal(repos[1].branch, 'dev');
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previous;
+  }
+});
+
 test('the route tags the turn a message belongs to, by message id', async () => {
   const home = scratch();
   const previous = process.env.DSH_HOME;
@@ -267,8 +296,8 @@ test('the route tags the turn a message belongs to, by message id', async () => 
 
     let response = await request('POST', { action: 'tag', sessionId: 'source', messageId: 'a1', note: '  **why**  ' });
     assert.equal(response.status, 200);
-    assert.deepEqual(response.body, { ok: true, sessionId: 'source', messageId: 'a1', turn: 1 },
-      'the answer names the turn the message resolved to');
+    assert.deepEqual(response.body, { ok: true, sessionId: 'source', messageId: 'a1', turn: 1, repos: 0 },
+      'the answer names the turn the message resolved to, and how many repositories it snapshot');
 
     response = await request('GET');
     assert.equal(response.body.messageTags.a1.note, '**why**', 'the chat action row reads its tag by message id');
