@@ -43,6 +43,16 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
+  // React reports a repeated key through console.error, which a test otherwise
+  // cannot see. React itself is imported here, in the test's own realm, so the
+  // recording has to sit on the real console rather than the bundle's copy.
+  const consoleErrors = [];
+  const realConsoleError = console.error;
+  console.error = function (...args) {
+    consoleErrors.push(args.map(String).join(' '));
+    realConsoleError.apply(console, args);
+  };
+  t.after(() => { console.error = realConsoleError; });
   const { createRoot } = await import('react-dom/client');
   const root = createRoot(dom.window.document.getElementById('root'));
   const disposers = [];
@@ -201,7 +211,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     dom, cardIds, offsets, titles, links, clickCard, foldCard,
     menuItems, openMenu, clickMenuItem, clickRail, hoverCard, outlineItems, outlineTurns, clickOutline, hoverOutlineRow, worldScale, wheelOn,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
-    opened, workspaceOpened, tabClicks,
+    opened, workspaceOpened, tabClicks, consoleErrors,
   };
 }
 
@@ -813,6 +823,25 @@ test('the left rail decides whether the cross-session layer is drawn', async (t)
 
   await view.clickRail();
   assert.equal(view.dom.window.document.querySelectorAll('.mtx-edge-ref').length, 1, 'and back on again');
+});
+
+test('one sender handing in two things draws two marks without colliding keys', async (t) => {
+  // The host emits one link per message, so a sender can contribute more than one
+  // before the next turn begins. A mark keyed by the sender alone would hand React
+  // the same key twice and reconcile the two into one.
+  const versions = [{
+    sessionId: 'session-root', createdAt: 1, current: true,
+    turns: Array.from({ length: 3 }, (_, i) => ({ turn: i + 1, text: 'turn ' + (i + 1), time: i + 1 })),
+    incoming: [
+      { senderSessionId: 'outside-sender', kind: 'agent-message', summary: 'first', feedsTurn: 2 },
+      { senderSessionId: 'outside-sender', kind: 'agent-message', summary: 'second', feedsTurn: 2 },
+    ],
+  }];
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, versions);
+  const marks = [...view.dom.window.document.querySelectorAll('.mtx-card-ref')];
+  assert.equal(marks.length, 2, 'both hand-ins are shown on the receiving card');
+  assert.deepEqual(view.consoleErrors.filter((line) => /same key/i.test(line)), [],
+    'React must not be handed the same key twice');
 });
 
 test('turning the layer off folds the turns it was holding open', async (t) => {

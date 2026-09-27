@@ -207,7 +207,6 @@ const prefsStore = {
       // this one on again writes the current version and is honoured from then
       // on. v3 moves one more value, and only when it cannot have been a choice:
       // see the foldSharedAt migration below.
-      const current = !!parsed && parsed.v === PREFS_VERSION;
       // rememberPath is dropped only when migrating from BEFORE v2: that is the
       // one schema whose default it was, so a stored true cannot be told from the
       // default there. From v2 on it is a deliberate choice and survives.
@@ -584,13 +583,26 @@ function sessionNavigator(ctx) {
 function openWhenListed(sessions, sessionId) {
   const list = sessions.list ? sessions.list() : null;
   if (!list || typeof list.getSnapshot !== 'function') { sessions.open(sessionId); return; }
-  if (list.getSnapshot().byId[sessionId] !== undefined) { sessions.open(sessionId); return; }
-  const stop = list.subscribe(function () {
-    if (list.getSnapshot().byId[sessionId] !== undefined) {
-      stop();
-      sessions.open(sessionId);
-    }
-  });
+  // Both halves are read defensively: a snapshot without `byId`, and a listener
+  // that fires during `subscribe`, are shapes a host is allowed to have.
+  const listed = function () {
+    const snapshot = list.getSnapshot();
+    const byId = snapshot ? snapshot.byId : undefined;
+    return byId !== undefined && byId[sessionId] !== undefined;
+  };
+  if (listed()) { sessions.open(sessionId); return; }
+  let stop;
+  let opened = false;
+  const open = function () {
+    if (opened) return;
+    opened = true;
+    if (typeof stop === 'function') stop();
+    sessions.open(sessionId);
+  };
+  stop = list.subscribe(function () { if (listed()) open(); });
+  // If the listener already ran, it could not unsubscribe while `stop` was still
+  // undefined; do it here so the subscription does not outlive its one purpose.
+  if (opened) stop();
 }
 
 async function mutate(operation) {
@@ -800,15 +812,6 @@ function buildTurnTree(versions, currentSessionId, options) {
     rootVersion = (rootId && byId.get(rootId)) || kept[0];
   }
   const rootSessionId = rootVersion.sessionId;
-
-  const activeSessionPath = new Set();
-  let cursor = byId.get(currentSessionId);
-  const seenSessions = new Set();
-  while (cursor && !seenSessions.has(cursor.sessionId)) {
-    seenSessions.add(cursor.sessionId);
-    activeSessionPath.add(cursor.sessionId);
-    cursor = cursor.parentSessionId ? byId.get(cursor.parentSessionId) : null;
-  }
 
   const nodes = [];
   const rootNodeId = rootSessionId + '#root';
@@ -1132,7 +1135,9 @@ function foldLongRuns(nodes, minHidden, keepIncoming) {
       run.push(cursor);
       cursor = kidsOf(cursor)[0];
     }
-    if (run.length < minHidden || !cursor) continue;
+    // `cursor` is always a node here: passThrough only ever walks to a single
+    // child that exists, so the run ends on the first turn that is not one.
+    if (run.length < minHidden) continue;
     const exit = cursor;
     const foldNode = {
       id: run[0].id + '#fold',
@@ -1557,7 +1562,12 @@ return {
           }
         }
       }
-      return ids;
+      // The Set is rebuilt from the snapshot on every render, and a memo that
+      // takes it as a dependency would miss every time — the tree would be built
+      // again on each one. The contents are what the consumer keys on, so the
+      // identity is pinned to them instead.
+      const key = Array.from(ids).sort().join('\n');
+      return React.useMemo(function () { return ids; }, [key]);
     }
 
     const I18N_NS = 'dsh-tree-view';
@@ -2067,7 +2077,15 @@ return {
             // gallery plus lightbox); keep the placeholder only when the slot
             // owner props do not carry the callback.
             messageImages.length > 0 && typeof props.renderMessageImages === 'function'
-              ? props.renderMessageImages({ images: messageImages, align: 'end' })
+              ? React.createElement(React.Fragment, null,
+                  props.renderMessageImages({ images: messageImages, align: 'end' }),
+                  // A block can say `image` and carry no attachment. It is counted in
+                  // `images` but the host's gallery cannot show it, so the remainder
+                  // still gets the placeholder instead of vanishing with it.
+                  images > messageImages.length
+                    ? React.createElement('div', { className: 'mtx-img' }, t('images', { count: images - messageImages.length }))
+                    : null
+                )
               : (images > 0 ? React.createElement('div', { className: 'mtx-img' }, t('images', { count: images })) : null)
           )
         ),
@@ -2212,6 +2230,19 @@ return {
       }).join('|');
       const layout = React.useMemo(function () { return layoutTurnTree(turnNodes); }, [layoutKey]);
 
+      // The reference layer follows the payload, not the layout. A link can land on
+      // a node whose id, parent and path are all unchanged — a sender already on
+      // the canvas hands material to a turn that is already drawn — and layoutKey
+      // would not move, leaving the arrow unbuilt and, because the mark filter
+      // reads the same memo, the mark suppressed with it.
+      const refsKey = turnNodes.map(function (n) {
+        const incoming = n.incoming;
+        if (incoming === undefined || incoming.length === 0) return '';
+        return n.id + '<' + incoming.map(function (link) {
+          return (link.senderSessionId || '') + ':' + (link.feedsTurn === undefined ? '' : link.feedsTurn);
+        }).join(';');
+      }).join('|');
+
       // Cross-session references: an arrow from the version that sent the material
       // to the turn that went on with it, drawn only when both ends are on the
       // canvas. A sender that is not here cannot be pointed at, so it becomes a
@@ -2226,11 +2257,17 @@ return {
           for (let j = 0; j < incoming.length; j++) {
             const from = lastOfSession.get(incoming[j].senderSessionId);
             if (from === undefined || from === turnNodes[i].id) continue;
-            edges.push({ key: 'ref:' + from + '>' + turnNodes[i].id, from: from, to: turnNodes[i].id });
+            // One sender can hand in more than one thing before the next turn
+            // begins, so the link's own position is part of its key.
+            edges.push({
+              key: 'ref:' + from + '>' + turnNodes[i].id + '#' + j,
+              from: from,
+              to: turnNodes[i].id,
+            });
           }
         }
         return { edges: edges, sessions: new Set(turnNodes.map(function (n) { return n.sessionId; })) };
-      }, [layoutKey]);
+      }, [layoutKey, refsKey]);
       layoutRef.current = layout;
 
       // Named branches are drawn as groups, the way a node editor boxes a set of
@@ -2822,9 +2859,9 @@ return {
                 // says where it came from instead.
                 prefs.showReferences && n.incoming ? React.createElement('span', { className: 'mtx-card-refs' },
                   n.incoming.filter(function (link) { return !refs.sessions.has(link.senderSessionId); })
-                    .slice(0, 3).map(function (link) {
+                    .slice(0, 3).map(function (link, index) {
                       return React.createElement('span', {
-                        key: 'ref-' + link.senderSessionId,
+                        key: 'ref-' + link.senderSessionId + '-' + index,
                         className: 'mtx-card-ref',
                         title: link.summary || link.senderSessionId,
                       }, '⇠ ' + String(link.senderSessionId).slice(0, 8));
@@ -3025,7 +3062,7 @@ return {
         // A degraded host is stated once, in place, rather than discovered by
         // clicking something that silently does nothing.
         archive.ok ? null : React.createElement('div', { className: 'mtx-notice' },
-          t('archivePartial', { parts: archive.missing.join('、') })),
+          t('archivePartial', { parts: (archive.missing || []).join('、') })),
         // Tidying up never kills work quietly: a version that is mid-turn gets
         // this question first. Drawn in the panel because the desktop shell
         // implements neither prompt() nor confirm().

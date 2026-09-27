@@ -143,6 +143,18 @@ test('an image block without an attachment uses the existing placeholder', async
   assert.equal(doc.querySelector('.mtx-img')?.textContent, '1 image(s) kept as-is');
 });
 
+test('an attachment-less image survives beside one the gallery can show', async t => {
+  const calls = [];
+  const doc = await mount(t, [text('Compare'), photo('first'), { type: 'image' }], gallery(calls));
+  assert.ok(calls.length > 0, 'the host gallery gets the attachment it can render');
+  for (const call of calls) {
+    assert.deepEqual(Array.from(call.images, image => image.attachment.id), ['first']);
+  }
+  // The gallery cannot show a block that carries no attachment. Without the
+  // notice the message would silently lose it.
+  assert.equal(doc.querySelector('.mtx-img')?.textContent, '1 image(s) kept as-is');
+});
+
 test('editing keeps the attachment notice and cancelling restores the host gallery', async t => {
   const calls = [];
   const doc = await mount(t, [text('Describe this'), photo('one')], gallery(calls));
