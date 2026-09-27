@@ -595,11 +595,25 @@ async function mutate(operation) {
 
 /* ---------------------------------------------------------------- utils -- */
 
+/**
+ * The block array a host keeps a message's content in.
+ *
+ * This plugin draws the user bubble itself, so it — not the host — decides how
+ * the blocks become pixels. A host that moves them one level down would leave
+ * an empty bubble behind, and because we are the occupant the row would not
+ * disappear: it would read as "my message is gone" rather than "unreadable".
+ */
+function contentBlocks(content) {
+  if (Array.isArray(content)) return content;
+  if (content && Array.isArray(content.blocks)) return content.blocks;
+  return [];
+}
+
 function contentText(content) {
-  if (!Array.isArray(content)) return '';
+  // A plain string is the oldest shape and is still perfectly drawable.
+  if (typeof content === 'string') return content;
   let out = '';
-  for (let i = 0; i < content.length; i++) {
-    const block = content[i];
+  for (const block of contentBlocks(content)) {
     if (block && block.type === 'text' && typeof block.text === 'string') {
       out += (out ? '\n' : '') + block.text;
     }
@@ -607,6 +621,9 @@ function contentText(content) {
   return out;
 }
 
+// Editing addresses one block by its index in the host's own array, so this
+// keeps the strict array contract: a shape recovered for display but not
+// addressable is shown, never offered for editing.
 function firstTextBlockIndex(content) {
   if (!Array.isArray(content)) return -1;
   for (let i = 0; i < content.length; i++) {
@@ -616,22 +633,65 @@ function firstTextBlockIndex(content) {
 }
 
 function imageCount(content) {
-  if (!Array.isArray(content)) return 0;
   let n = 0;
-  for (let i = 0; i < content.length; i++) {
-    if (content[i] && content[i].type === 'image') n += 1;
+  for (const block of contentBlocks(content)) {
+    if (block && block.type === 'image') n += 1;
   }
   return n;
 }
 
 function imageParts(content) {
-  if (!Array.isArray(content)) return [];
   const out = [];
-  for (let i = 0; i < content.length; i++) {
-    const block = content[i];
+  for (const block of contentBlocks(content)) {
     if (block && block.type === 'image' && block.attachment) out.push({ attachment: block.attachment });
   }
   return out;
+}
+
+/**
+ * True when a node carries content this build cannot draw a single piece of.
+ *
+ * The alternative to a notice is an empty bubble, and an empty bubble reads as
+ * a lost message. This is the narrow condition that earns one: content is
+ * present, but no block in it is a text or an image. Content we can partly draw
+ * is drawn normally, without a notice.
+ */
+function unrenderedContent(content) {
+  if (content === undefined || content === null || typeof content === 'string') return false;
+  if (Array.isArray(content) && content.length === 0) return false;
+  const blocks = contentBlocks(content);
+  if (blocks.length === 0) return true;
+  for (const block of blocks) {
+    if (!block) continue;
+    if (block.type === 'text' && typeof block.text === 'string') return false;
+    if (block.type === 'image') return false;
+  }
+  return true;
+}
+
+// A host that moved the content shape would otherwise warn on every bubble it
+// drew, so the diagnosis is reported once per page load.
+let warnedUnrenderedContent = false;
+
+/**
+ * Report what the host actually sent, once. This is the point of the notice:
+ * a silent placeholder leaves nobody able to tell a host upgrade from a bug in
+ * this plugin, and the block types are the one fact that separates them.
+ */
+function reportUnrenderedContent(content) {
+  if (warnedUnrenderedContent) return;
+  warnedUnrenderedContent = true;
+  const types = contentBlocks(content)
+    .map(block => (block && typeof block.type === 'string' ? block.type : typeof block))
+    .slice(0, 8);
+  let summary;
+  try {
+    summary = JSON.stringify(content).slice(0, 160);
+  } catch (error) {
+    summary = '<unserializable>';
+  }
+  console.warn('[dsh-tree-view] A user message carries content this build cannot draw; its bubble shows a notice instead. '
+    + 'block types: ' + (types.length > 0 ? types.join(', ') : summary));
 }
 
 function clip(text, max) {
@@ -1147,6 +1207,7 @@ const CSS = [
   '.mtx-edit-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}',
   '.mtx-bubble{background:var(--dsw-alias-interactive-bg-hover,rgba(140,140,150,.14));border-radius:16px;padding:10px 16px;font-size:15px;line-height:26px;color:var(--dsw-alias-label-primary);white-space:pre-wrap;overflow-wrap:anywhere}',
   '.mtx-img{font-size:12px;color:var(--dsw-alias-label-tertiary);margin-top:4px}',
+  '.mtx-lost{font-style:italic;color:var(--dsw-alias-label-tertiary)}',
 
   // Inline editor, ChatGPT-style: the bubble grows into an editing surface
   // with Cancel / Send below-right.
@@ -1431,6 +1492,7 @@ return {
         menuDemote: 'Collect into the tree',
         menuDemoteOpen: 'This is the conversation you have open',
         moveFailed: 'Move failed: {message}',
+        contentUnavailable: 'This message has a shape this build cannot draw. See the console for the block types it received.',
         previewUser: 'Rewrite this paragraph to be more concise.',
       },
       zh: {
@@ -1501,6 +1563,7 @@ return {
         menuDemote: '收到 Tree 里',
         menuDemoteOpen: '这就是你当前打开的会话',
         moveFailed: '移动失败：{message}',
+        contentUnavailable: '这条消息的格式此版本无法绘制；控制台里记下了它实际收到的块类型。',
         previewUser: '把这段话改写得更简洁一些。',
       },
     };
@@ -1643,6 +1706,9 @@ return {
       const text = contentText(data.content);
       const images = imageCount(data.content);
       const messageImages = imageParts(data.content);
+      // Content we cannot draw at all. The bubble below says so instead of
+      // rendering empty, and the effect after it reports the shape once.
+      const lostContent = unrenderedContent(data.content);
       const sessionId = props.sessionId !== undefined ? props.sessionId : (node.sessionId);
       // location.turn is a turn-group object ({turn, start, end, steps}); the
       // turn number lives one level down.
@@ -1730,6 +1796,10 @@ return {
         pendingRestore.add(root);
         openVersionTarget(sessions, target);
       }, [versions, sessionId, sessions, prefs.rememberPath]);
+
+      React.useEffect(function () {
+        if (lostContent) reportUnrenderedContent(data.content);
+      }, [lostContent]);
 
       const [editing, setEditing] = React.useState(false);
       const [draft, setDraft] = React.useState('');
@@ -1873,6 +1943,9 @@ return {
         React.createElement('div', { className: 'mtx-line' },
           React.createElement('div', { className: 'mtx-bubble' },
             text,
+            // This bubble is ours now, so an unreadable message must not look
+            // like a deleted one: say what happened, in the reader's language.
+            lostContent ? React.createElement('span', { className: 'mtx-lost' }, t('contentUnavailable')) : null,
             // The host renders attachments through its images slot (native
             // gallery plus lightbox); keep the placeholder only when the slot
             // owner props do not carry the callback.
