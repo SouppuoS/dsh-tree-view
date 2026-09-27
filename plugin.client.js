@@ -1247,7 +1247,7 @@ const CSS = [
   // property is substituted where it is *declared*, so a `:root` alias would freeze
   // whatever the palette said at the top of the document and the dark theme would
   // never reach it.
-  '.mtx-row,.mtx-graph,.mtx-set{--mtx-accent:var(--dsw-alias-state-business-primary,var(--dsw-alias-accent-primary,#4176e6));--mtx-accent-soft:color-mix(in srgb,var(--mtx-accent) 55%,transparent);--mtx-surface:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-primary,#ffffff));--mtx-surface-raised:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-layer-2,#ffffff));--mtx-line:var(--dsw-alias-border-l2,var(--dsw-alias-border-secondary,#0000001a));--mtx-line-strong:var(--dsw-alias-border-l3,var(--dsw-alias-border-l2,#0000001f));--mtx-shadow:var(--dsw-alias-bg-mask-2,#0000001f);--mtx-shadow-strong:var(--dsw-alias-bg-mask-3,#0000007a);--mtx-danger:var(--dsw-alias-state-error-primary,var(--dsw-alias-status-error,#ec1313));--mtx-warn:var(--dsw-alias-state-warn-primary,var(--dsw-alias-status-warning,#f59e0b));--mtx-on-accent:var(--dsw-alias-label-primary-foreground,#ffffff)}',
+  '.mtx-row,.mtx-graph,.mtx-set,.mtx-tag{--mtx-accent:var(--dsw-alias-state-business-primary,var(--dsw-alias-accent-primary,#4176e6));--mtx-accent-soft:color-mix(in srgb,var(--mtx-accent) 55%,transparent);--mtx-surface:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-primary,#ffffff));--mtx-surface-raised:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-layer-2,#ffffff));--mtx-line:var(--dsw-alias-border-l2,var(--dsw-alias-border-secondary,#0000001a));--mtx-line-strong:var(--dsw-alias-border-l3,var(--dsw-alias-border-l2,#0000001f));--mtx-shadow:var(--dsw-alias-bg-mask-2,#0000001f);--mtx-shadow-strong:var(--dsw-alias-bg-mask-3,#0000007a);--mtx-danger:var(--dsw-alias-state-error-primary,var(--dsw-alias-status-error,#ec1313));--mtx-warn:var(--dsw-alias-state-warn-primary,var(--dsw-alias-status-warning,#f59e0b));--mtx-on-accent:var(--dsw-alias-label-primary-foreground,#ffffff)}',
   // User bubble replica: right-aligned rounded panel like the host's, with a
   // hover-revealed edit control to its left, ChatGPT-style.
   '.mtx-row{display:flex;flex-direction:column;align-items:flex-end;gap:6px}',
@@ -1321,9 +1321,15 @@ const CSS = [
   '.mtx-card-mark{position:absolute;top:-8px;left:8px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:600;line-height:15px;color:var(--mtx-on-accent);background:var(--mtx-accent)}',
   '.mtx-card-note{display:block;margin-top:5px;padding-top:5px;border-top:1px solid color-mix(in srgb,currentColor 20%,transparent);font-size:11px;line-height:15px;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary));white-space:pre-wrap;overflow-wrap:anywhere;max-height:62px;overflow:hidden}',
   '.mtx-card-note code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;background:color-mix(in srgb,currentColor 14%,transparent);border-radius:4px;padding:0 3px}',
+  '.mtx-tag{position:relative;display:inline-flex;align-items:center}',
   '.mtx-tag-act[data-tagged]{color:var(--mtx-accent)}',
-  '.mtx-tag-edit{display:flex;flex-direction:column;gap:6px;margin-top:8px;width:min(85%,720px)}',
-  '.mtx-tag-input{width:100%;box-sizing:border-box;min-height:56px;resize:vertical;border:1px solid var(--mtx-line);border-radius:10px;padding:8px 10px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;line-height:18px}',
+  // The note editor is a POPOVER, not a row item. The action row is a horizontal
+  // cluster of icon buttons: a textarea that joined it as a flex child pushed the
+  // row apart and covered every control after it, and it had no surface of its
+  // own because the --mtx-* aliases are scoped to this plugin's own containers.
+  // Anchored to the button and lifted above it, it changes nothing about the row.
+  '.mtx-tag-edit{position:absolute;bottom:calc(100% + 10px);right:0;z-index:40;width:min(320px,78vw);display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;border:1px solid var(--mtx-line);background:var(--mtx-surface-raised);box-shadow:0 12px 32px var(--mtx-shadow-strong);text-align:left;white-space:normal}',
+  '.mtx-tag-input{width:100%;box-sizing:border-box;min-height:64px;resize:vertical;border:1px solid var(--mtx-line);border-radius:10px;padding:8px 10px;background:var(--mtx-surface);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;line-height:18px}',
   '.mtx-tag-actions{display:flex;justify-content:flex-end;gap:8px}',
   '.mtx-tag-error{font-size:11px;color:var(--mtx-danger)}',
   '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--mtx-accent) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--mtx-accent) 7%,transparent);z-index:0;pointer-events:none}',
@@ -2922,10 +2928,49 @@ return {
           .finally(function () { setBusy(false); });
       }
 
-      // The editor replaces the button while it is open, so the note is written
-      // in place rather than in a dialog the canvas would have to host.
-      if (draft !== null) {
-        return React.createElement('span', { className: 'mtx-tag-edit' },
+      // Clicking anywhere outside the popover closes it, the way the tree's own
+      // menu closes: the action row belongs to the chat, and a leaked editor
+      // would sit there until the view was replaced.
+      React.useEffect(function () {
+        if (draft === null) return undefined;
+        const onDown = function (event) {
+          if (event.target && event.target.closest && event.target.closest('.mtx-tag')) return;
+          setDraft(null);
+        };
+        document.addEventListener('pointerdown', onDown, true);
+        return function () { document.removeEventListener('pointerdown', onDown, true); };
+      }, [draft === null]);
+
+      // The editor is a SIBLING of the button inside this wrapper and is
+      // absolutely positioned. The action row is a horizontal cluster of icon
+      // buttons: an editor that took part in that layout pushed the row apart and
+      // covered every control after it, and it had no surface of its own because
+      // the plugin's theme aliases are scoped to its own containers.
+      return React.createElement('span', { className: 'mtx-tag' },
+        React.createElement('button', {
+          type: 'button',
+          className: 'mtx-act mtx-tag-act',
+          'data-tagged': tag ? '' : undefined,
+          'aria-pressed': tag ? 'true' : 'false',
+          'aria-expanded': draft === null ? undefined : 'true',
+          title: tag ? t('tagRemove') : t('tagAdd'),
+          disabled: busy || undefined,
+          onClick: function () {
+            // Open while closed, close while open, and only take a tag off from
+            // the closed state: one control, one gesture, and no way to lose a
+            // tag by accident while writing its note.
+            if (draft !== null) { setDraft(null); return; }
+            if (tag) { remove(); return; }
+            // Tag first, then offer the note: the tag is the point and the note
+            // is optional, and leaving the editor open is what lets the reader
+            // add one without a second gesture.
+            put('', function () { setDraft(''); });
+          },
+        }, TagIcon()),
+        draft === null ? null : React.createElement('span', {
+          className: 'mtx-tag-edit',
+          onPointerDown: function (event) { event.stopPropagation(); },
+        },
           React.createElement('textarea', {
             className: 'mtx-tag-input',
             value: draft,
@@ -2951,26 +2996,8 @@ return {
             }, t('cancel'))
           ),
           error ? React.createElement('span', { className: 'mtx-tag-error' }, error) : null
-        );
-      }
-
-      return React.createElement('span', { className: 'mtx-tag' },
-        React.createElement('button', {
-          type: 'button',
-          className: 'mtx-act mtx-tag-act',
-          'data-tagged': tag ? '' : undefined,
-          'aria-pressed': tag ? 'true' : 'false',
-          title: tag ? t('tagRemove') : t('tagAdd'),
-          disabled: busy || undefined,
-          onClick: function () {
-            // Tag first, then offer the note: the tag is the point and the note
-            // is optional, and leaving the editor open is what lets the reader
-            // add one without a second gesture.
-            if (tag) { remove(); return; }
-            put('', function () { setDraft(''); });
-          },
-        }, TagIcon()),
-        error ? React.createElement('span', { className: 'mtx-tag-error' }, error) : null
+        ),
+        draft === null && error ? React.createElement('span', { className: 'mtx-tag-error' }, error) : null
       );
     }
 

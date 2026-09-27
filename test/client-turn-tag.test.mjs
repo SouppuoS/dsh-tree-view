@@ -92,6 +92,11 @@ test('clicking the button tags the turn and offers the note', async (t) => {
 
   const editor = dom.window.document.querySelector('.mtx-tag-input');
   assert.ok(editor, 'and opens the note editor, because the note is optional but offered');
+  // The row is a horizontal cluster: an editor that joined its layout would push
+  // the row apart and cover the controls after it. It has to be a popover INSIDE
+  // the wrapper, so the wrapper is what the row lays out.
+  assert.equal(dom.window.document.querySelector('.mtx-tag .mtx-tag-edit') === editor.parentElement,
+    true, 'the editor is a popover inside the tag wrapper, not a row item');
 
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value').set;
