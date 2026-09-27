@@ -118,6 +118,15 @@ function harness() {
   // a script never emits a write/edit call at all, so `present` is what names them.
   append('deliverables/presented', { turn: 1, callId: 'p1', files: [{ path: '/repo/out/report.md', description: 'the report' }] });
   append('turn/end', { turn: 1 });
+  // A settlement notice from a continuable child. It arrives BETWEEN turns and
+  // carries no turn of its own, so what it feeds is the next turn to start.
+  append('user/message', {
+    id: 'm-notice', role: 'user', source: { kind: 'subagent-settled', form: 'notice', summary: 'child settled', senderSessionId: 'child-1' },
+    content: [{ type: 'text', text: 'child settled' }],
+  });
+  append('turn/start', { turn: 2 });
+  append('user/message', { id: 'm2', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'second' }] });
+  append('turn/end', { turn: 2 });
 
   const registry = {
     archivedSessionIds: [],
@@ -225,6 +234,24 @@ test('a turn carries the files it produced, and only the ones it really wrote', 
     assert.deepEqual(response.body.versions[0].turns[0].files,
       ['/repo/src/a.ts', '/repo/src/d.ts', '/repo/out/report.md'],
       'successful mutations then declared deliverables, first-seen order, one entry per file, reads excluded');
+  } finally {
+    if (previous === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previous;
+  }
+});
+
+test('a session fed by another one records where the material came from', async () => {
+  const home = scratch();
+  const previous = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  try {
+    const response = await harness()('GET');
+    assert.deepEqual(response.body.versions[0].incoming, [{
+      senderSessionId: 'child-1',
+      kind: 'subagent-settled',
+      summary: 'child settled',
+      feedsTurn: 2,
+    }], 'the sender, what kind of message it was, and the turn it fed');
   } finally {
     if (previous === undefined) delete process.env.DSH_HOME;
     else process.env.DSH_HOME = previous;
