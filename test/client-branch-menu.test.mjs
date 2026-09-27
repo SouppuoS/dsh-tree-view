@@ -127,13 +127,13 @@ test('the branch menu offers the other move right after a move', async (t) => {
   await view.openMenuOnBranch();
   // No locale service in this harness, so the plugin's English dictionary is
   // what renders — the point here is which items appear, not the wording.
-  assert.deepEqual(view.menuLabels(), ['Rename branch', 'Collect into the tree'], 'a version in the sidebar can be collected into the tree');
+  assert.deepEqual(view.menuLabels(), ['Rename branch', 'Collect into the tree', 'Collect every other branch'], 'a version in the sidebar can be collected into the tree');
 
   await view.clickMenuItem('Collect into the tree');
   assert.deepEqual(view.posts, [{ action: 'demote', sessionId: 'session-branch' }], 'the move reached the host route');
 
   await view.openMenuOnBranch();
-  assert.deepEqual(view.menuLabels(), ['Rename branch', 'Move to main chat'],
+  assert.deepEqual(view.menuLabels(), ['Rename branch', 'Move to main chat', 'Collect every other branch'],
     'and the menu flips on the next right-click, without waiting for a refetch');
 });
 

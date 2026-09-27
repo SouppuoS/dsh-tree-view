@@ -245,12 +245,6 @@ const prefsStore = {
   },
 };
 
-// How long straight stretches are drawn, per family: 'auto' follows the
-// threshold in Settings, 'expanded' keeps them all open, 'folded' closes them by
-// hand. Kept for the page rather than for one mount, so switching tabs or views
-// does not undo a choice the reader just made.
-const foldModes = new Map();
-
 // What the fold threshold can be. 0 means "never fold on its own"; the toolbar
 // button folds by hand either way.
 const FOLD_CHOICES = [0, 2, 5, 8, 12, 20];
@@ -1119,6 +1113,9 @@ function foldLongRuns(nodes, minHidden) {
       foldShared: !before || before.isRoot === true,
       foldFromTurn: run[0].turn,
       foldToTurn: run[run.length - 1].turn,
+      // The hidden turns themselves, in order: the card is a summary and the
+      // outline that opens on hover is the only place they are listed.
+      foldNodes: run,
       time: run[0].time || 0,
       // The fold stands in for those turns, so it is on the line exactly when
       // they are: reading a branch keeps its history highlighted as one line.
@@ -1337,6 +1334,16 @@ const CSS = [
   '.mtx-menu{position:absolute;left:0;top:0;z-index:9;display:flex;flex-direction:column;min-width:148px;padding:4px;border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 10px 30px var(--mtx-shadow-strong)}',
   '.mtx-menu-item{appearance:none;border:0;background:transparent;text-align:left;font-family:inherit;font-size:12.5px;line-height:18px;padding:7px 10px;border-radius:8px;color:var(--dsw-alias-label-primary,#eee);cursor:pointer;white-space:nowrap}',
   '.mtx-menu-item:hover:not([disabled]){background:var(--dsw-alias-interactive-bg-hover,var(--mtx-line))}',
+  // The fold outline: the branch menu's shape, but it lists turns and opens on
+  // hover instead of on a right-click.
+  '.mtx-outline{position:absolute;left:0;top:0;z-index:8;width:262px;max-height:320px;display:flex;flex-direction:column;border-radius:12px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 14px 38px var(--mtx-shadow-strong);overflow:hidden}',
+  '.mtx-outline-head{padding:8px 10px;border-bottom:1px solid color-mix(in srgb,currentColor 14%,transparent);font-size:11.5px;font-weight:600;color:var(--dsw-alias-label-secondary,#bbb)}',
+  '.mtx-outline-list{overflow-y:auto;padding:4px;display:flex;flex-direction:column;gap:2px}',
+  '.mtx-outline-item{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;appearance:none;border:0;background:transparent;text-align:left;font-family:inherit;font-size:12px;line-height:16px;padding:6px 8px;border-radius:8px;color:var(--dsw-alias-label-primary,#eee);cursor:pointer}',
+  '.mtx-outline-item:hover{background:var(--dsw-alias-interactive-bg-hover,var(--mtx-line))}',
+  '.mtx-outline-icon{flex:none;width:14px;text-align:center;color:var(--dsw-alias-label-tertiary,#888)}',
+  '.mtx-outline-turn{flex:none;color:var(--dsw-alias-label-secondary,#bbb)}',
+  '.mtx-outline-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#888)}',
   '.mtx-menu-item[disabled]{color:var(--dsw-alias-label-tertiary,#888);cursor:not-allowed}',
   '.mtx-rename{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;z-index:7}',
   '.mtx-rename-input{width:100%;box-sizing:border-box;font-family:inherit;font-size:12.5px;line-height:17px;padding:9px 11px;border-radius:13px;border:1px solid var(--mtx-accent);background:var(--mtx-surface);color:var(--dsw-alias-label-primary,#eee);outline:none;box-shadow:0 6px 22px var(--mtx-shadow-strong)}',
@@ -1347,10 +1354,6 @@ const CSS = [
   '.mtx-card-main{min-width:0;flex:1}',
   '.mtx-card-title{font-size:12.5px;font-weight:600;line-height:17px;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
   '.mtx-card-sub{font-size:11px;line-height:15px;margin-top:2px;color:var(--dsw-alias-label-tertiary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
-  '.mtx-graph-tools{position:absolute;top:12px;right:14px;display:flex;gap:6px;z-index:4}',
-  '.mtx-tool{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:var(--mtx-surface);color:var(--dsw-alias-label-secondary,#bbb);cursor:pointer;font-size:14px}',
-  '.mtx-tool:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
-  '.mtx-tool[data-on]{color:var(--mtx-accent);border-color:color-mix(in srgb,var(--mtx-accent) 55%,transparent);background:color-mix(in srgb,var(--mtx-accent) 14%,transparent)}',
   '.mtx-confirm{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%);z-index:10;width:min(460px,calc(100% - 40px));box-sizing:border-box;padding:22px 24px;border-radius:15px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 18px 50px var(--mtx-shadow-strong)}',
   '.mtx-confirm-title{font-size:15px;line-height:23px;color:var(--dsw-alias-label-primary,#eee)}',
   '.mtx-confirm-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}',
@@ -1508,8 +1511,6 @@ return {
         edited: 'Edited turn {turn}',
         retried: 'Regenerated turn {turn}',
         branch: 'Branch',
-        refresh: 'Refresh',
-        fit: 'Center view',
         empty: 'No versions yet — edit any of your messages to branch this conversation. Drag to pan, scroll to zoom.',
         images: '{count} image(s) kept as-is',
         nav: 'TreeView',
@@ -1538,13 +1539,9 @@ return {
         forkedAt: 'forked at turn {turn}',
         dropForksLabel: 'Hide forks with no new turns',
         dropForksHint: 'A fork that only copied this conversation and never added a turn of its own is not drawn. The Tree toolbar has the same switch, for when you want to see them.',
-        dropForksTool: 'Hide empty forks',
         foldTurns: '{count} shared turns',
         foldRun: '{count} turns in a row',
-        foldExpandHint: 'Click to unfold these turns',
-        foldCollapse: 'Fold long stretches',
-        foldExpand: 'Unfold long stretches',
-        foldNothing: 'Nothing long enough to fold',
+        foldOutlineHint: 'Hover to see the turns inside',
         foldSharedLabel: 'Fold long straight stretches',
         foldSharedHint: 'The turns every branch has in common, and any unbranched run a single branch continues on, are drawn as one node once that many of them are hidden. Click that node — or the toolbar button — to unfold them again. "Never" leaves them drawn.',
         foldSharedOff: 'Never',
@@ -1586,8 +1583,6 @@ return {
         edited: '编辑了第 {turn} 轮',
         retried: '重新生成第 {turn} 轮',
         branch: '分支',
-        refresh: '刷新',
-        fit: '居中显示',
         empty: '还没有版本——编辑任意一条你的消息即可创建分支。拖动平移，滚轮缩放。',
         images: '{count} 张图片将原样保留',
         nav: 'TreeView',
@@ -1616,13 +1611,9 @@ return {
         forkedAt: '分叉于第 {turn} 轮',
         dropForksLabel: '不画没有新内容的副本',
         dropForksHint: '只复制了本对话、自己没聊出新内容的 Fork 不画出来；Tree 工具栏上有同一个开关，想看得时候随手打开。',
-        dropForksTool: '不画空副本',
         foldTurns: '共用历史 · {count} 轮',
         foldRun: '连续 {count} 轮',
-        foldExpandHint: '点击展开这几轮',
-        foldCollapse: '折叠长段',
-        foldExpand: '展开长段',
-        foldNothing: '没有长到需要折叠的连续轮次',
+        foldOutlineHint: '悬停查看里面有哪些轮',
         foldSharedLabel: '折叠过长的连续轮次',
         foldSharedHint: '「每个分支都一样的开头」以及「一条分支一路直下、中途没有分叉的连续轮次」，隐藏轮数达到这里选的值就折成一个节点；点那个节点（或工具栏按钮）即可展开。「永不」则一直画全。',
         foldSharedOff: '永不',
@@ -1668,64 +1659,6 @@ return {
         console.warn('[dsh-tree-view] Failed to register translations; using English.', e);
       }
     });
-
-    /**
-     * Two branches off one stem — the second one dashed while empty forks are
-     * filtered out, solid while they are shown. The icon states what the button
-     * does instead of needing a sentence.
-     */
-    function ForkIcon(props) {
-      const filtered = props && props.filtered;
-      return React.createElement('svg', {
-        width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
-      },
-        React.createElement('path', {
-          d: 'M4.2 13.4V3.2M4.2 5.6h7.2', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
-        }),
-        React.createElement('circle', { cx: 11.8, cy: 5.6, r: 1.7, fill: 'currentColor' }),
-        React.createElement('path', {
-          d: 'M4.2 9.4h4.6', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
-          strokeDasharray: filtered ? '2 2.2' : undefined,
-        }),
-        React.createElement('circle', {
-          cx: 11.8, cy: 9.4, r: 1.7, fill: 'currentColor', opacity: filtered ? 0.35 : 1,
-        }));
-    }
-
-    /** The shared history closing up between two turns: two arrows, one line. */
-    function FoldIcon() {
-      return React.createElement('svg', {
-        width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
-      },
-        React.createElement('path', {
-          d: 'M4.4 2.8 8 6.4l3.6-3.6', stroke: 'currentColor', strokeWidth: 1.3,
-          strokeLinecap: 'round', strokeLinejoin: 'round',
-        }),
-        React.createElement('path', {
-          d: 'M4.4 13.2 8 9.6l3.6 3.6', stroke: 'currentColor', strokeWidth: 1.3,
-          strokeLinecap: 'round', strokeLinejoin: 'round',
-        }));
-    }
-
-    /** Everything funnelled back into one place: collect the other branches. */
-    function CollectIcon() {
-      return React.createElement('svg', {
-        width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
-      },
-        React.createElement('path', {
-          d: 'M2.4 12.6h11.2', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
-        }),
-        React.createElement('path', {
-          d: 'M3.6 3.2v3.4a2 2 0 0 0 2 2h4.8', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
-        }),
-        React.createElement('path', {
-          d: 'M12.4 3.2v3.4a2 2 0 0 1-2 2H8.6', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round',
-        }),
-        React.createElement('path', {
-          d: 'M8 6.4v5.6m0 0-1.8-1.8M8 12l1.8-1.8', stroke: 'currentColor', strokeWidth: 1.3,
-          strokeLinecap: 'round', strokeLinejoin: 'round',
-        }));
-    }
 
     /** A tag glyph, drawn like the row's other icons so it sits in the row. */
     function TagIcon() {
@@ -2120,6 +2053,24 @@ return {
       const confirmState = React.useState(null);
       const confirmBusy = confirmState[0];
       const setConfirmBusy = confirmState[1];
+      // The fold outline: which fold the pointer is on, and the timer that keeps
+      // the panel open while the pointer travels from the card into it. Without
+      // the timer the panel would close in the gap between the two.
+      const foldHoverState = React.useState(null);
+      const foldHover = foldHoverState[0];
+      const setFoldHover = foldHoverState[1];
+      const foldHoverTimer = React.useRef(null);
+      function foldOutlineEnter(id) {
+        if (foldHoverTimer.current) { clearTimeout(foldHoverTimer.current); foldHoverTimer.current = null; }
+        setFoldHover(id);
+      }
+      function foldOutlineLeave() {
+        if (foldHoverTimer.current) clearTimeout(foldHoverTimer.current);
+        foldHoverTimer.current = setTimeout(function () {
+          foldHoverTimer.current = null;
+          setFoldHover(null);
+        }, 160);
+      }
       const springs = React.useRef(new Map());
       const layoutRef = React.useRef(null);
       const viewRef = React.useRef({ x: 60, y: 42, scale: 1 });
@@ -2139,37 +2090,17 @@ return {
       // the threshold in Settings decides what is long enough, for the automatic
       // fold and for the toolbar control alike: a button that folded shorter runs
       // than the setting allows was folding three-turn runs out of nowhere.
-      const [, bumpFold] = React.useReducer(function (x) { return x + 1; }, 0);
       const FOLD_FLOOR = 2;
-      const familyRootId = (function () {
-        for (let i = 0; i < fullNodes.length; i++) {
-          if (fullNodes[i].isRoot) return fullNodes[i].id;
-        }
-        return null;
-      })();
       const foldAt = prefs.foldSharedAt > 0 ? Math.max(prefs.foldSharedAt, FOLD_FLOOR) : 0;
       const foldable = React.useMemo(function () {
         return foldAt > 0 ? foldLongRuns(fullNodes, foldAt) : null;
       }, [fullNodes, foldAt]);
-      // 'expanded' is the reader saying "show them" for this family; anything
-      // else follows the setting.
-      const foldExpanded = familyRootId ? foldModes.get(familyRootId) === 'expanded' : false;
-      const folds = foldExpanded ? null : foldable;
+      // A fold is a summary, not a drawer. The outline it opens on hover is how
+      // the turns inside it are read and reached, so there is no in-canvas unfold
+      // left to keep state for; turning folding off is a setting.
+      const folds = foldable;
       const folded = !!folds;
       const turnNodes = folded ? folds.nodes : fullNodes;
-
-      function setFoldExpanded(expanded) {
-        if (!familyRootId) return;
-        if (expanded) foldModes.set(familyRootId, 'expanded');
-        else foldModes.delete(familyRootId);
-        // Folding or unfolding can change the canvas by a factor of several — a
-        // single click can hide or reveal a hundred turns — so the view is framed
-        // again once the new layout lands, instead of leaving the reader to pan
-        // back to the tree by hand. The flag is read by the layout effect below:
-        // the fit has to happen after the new positions exist, not before.
-        fitAfterLayoutRef.current = true;
-        bumpFold();
-      }
 
       const layoutKey = turnNodes.map(function (n) {
         return n.id + ':' + (n.parentId || '') + ':' + (n.onCurrentPath ? 1 : 0);
@@ -2390,11 +2321,15 @@ return {
 
       function openVersion(id) {
         const lay = layoutRef.current;
-        const node = lay && lay.byId.get(id);
+        // A turn inside a fold is not laid out, so the lookup falls back to the
+        // full tree: the outline on the fold is exactly how those turns are
+        // reached now.
+        const node = (lay && lay.byId.get(id)) || fullNodes.find(function (item) { return item.id === id; });
         if (!node || node.deleted) return;
-        // The fold node is not a session; it is the shared history in one card,
-        // and clicking it is how you read that history again.
-        if (node.fold) { setFoldExpanded(true); return; }
+        // A fold stands for turns, not for a version: it has nothing to open, and
+        // clicking it must not redraw the canvas under the reader. Its outline is
+        // where the turns it hides are read.
+        if (node.fold) return;
         if (!sessions) return;
         const v = versions.find(function (item) { return item.sessionId === node.sessionId; });
         if (!v) return;
@@ -2573,7 +2508,7 @@ return {
         // pan and capture the pointer on the graph, which retargets the click
         // that follows to the graph — so the dialog's buttons received no click
         // at all and Cancel looked dead. Overlays belong on this list.
-        if (ev.target.closest && ev.target.closest('.mtx-tool,.mtx-link,.mtx-rename,.mtx-menu,.mtx-confirm')) return;
+        if (ev.target.closest && ev.target.closest('.mtx-outline,.mtx-link,.mtx-rename,.mtx-menu,.mtx-confirm')) return;
         if (cardEl) {
           // A press on a node only selects it: nodes stay where the layout put
           // them. Dragging them around was a way to lose the shape of a branch,
@@ -2698,7 +2633,10 @@ return {
               // of its turns is recognisable at a glance.
               'data-subagent': n.subagent || undefined,
               'data-tag': n.tag ? '' : undefined,
-              title: n.deleted ? undefined : (n.fold ? t('foldExpandHint') : t('menuHint')),
+              title: n.deleted ? undefined : (n.fold ? t('foldOutlineHint') : t('menuHint')),
+              // Only a fold has an outline; every other card behaves as before.
+              onMouseEnter: n.fold ? function () { foldOutlineEnter(n.id); } : undefined,
+              onMouseLeave: n.fold ? foldOutlineLeave : undefined,
               onContextMenu: function (ev) {
                 ev.preventDefault();
                 ev.stopPropagation();
@@ -2791,6 +2729,16 @@ return {
               disabled: !archive.show,
               run: function () { moveVersion(node, 'promote'); },
             });
+            // Collecting every other branch used to be a toolbar button. It is a
+            // bulk action, but it is still an action about a branch, so it belongs
+            // on a branch rather than nowhere.
+            items.push({
+              key: 'collectOthers',
+              label: t('collectOthers'),
+              hint: !archive.hide ? t('archiveUnavailable') : null,
+              disabled: !archive.hide,
+              run: function () { setMenu(null); collectOthers(false); },
+            });
             return React.createElement('div', {
               className: 'mtx-menu',
               key: 'context-menu',
@@ -2810,46 +2758,44 @@ return {
             );
           })()
         ),
-        React.createElement('div', { className: 'mtx-graph-tools' },
-          // Two controls over what the canvas shows, drawn as what they do: the
-          // fork icon loses its second branch while empty forks are filtered
-          // out, so the button does not need a sentence to explain itself.
-          React.createElement('button', {
-            type: 'button',
-            className: 'mtx-tool',
-            'data-on': prefs.dropEmptyForks ? '' : undefined,
-            'aria-pressed': prefs.dropEmptyForks ? 'true' : 'false',
-            title: t('dropForksTool'),
-            onClick: function () { prefsStore.set({ dropEmptyForks: !prefs.dropEmptyForks }); },
-          }, ForkIcon({ filtered: prefs.dropEmptyForks })),
-          React.createElement('button', {
-            type: 'button',
-            className: 'mtx-tool',
-            title: archive.hide ? t('collectOthers') : t('archiveUnavailable'),
-            disabled: !archive.hide || undefined,
-            onClick: function () { collectOthers(false); },
-          }, CollectIcon()),
-          // One control for the shared history: pressed means it is drawn as a
-          // single node, unpressed means every turn is on the canvas. Off is
-          // also how you undo the automatic fold from Settings.
-          React.createElement('button', {
-            type: 'button',
-            className: 'mtx-tool',
-            'data-on': folded ? '' : undefined,
-            'aria-pressed': folded ? 'true' : 'false',
-            title: !foldable ? t('foldNothing') : (folded ? t('foldExpand') : t('foldCollapse')),
-            disabled: !foldable || undefined,
-            onClick: function () { setFoldExpanded(folded); },
-          }, FoldIcon()),
-          React.createElement('button', {
-            type: 'button', className: 'mtx-tool', title: t('fit'),
-            onClick: function () { fitView(); },
-          }, '⌖'),
-          React.createElement('button', {
-            type: 'button', className: 'mtx-tool', title: t('refresh'),
-            onClick: function () { treeStore.load(sessionId); },
-          }, '↻')
-        ),
+        // What a fold hides, listed where the fold is. This is why the canvas no
+        // longer unfolds in place: the outline answers "what is in there" and
+        // "take me to that turn" without redrawing a hundred cards.
+        foldHover === null ? null : (function () {
+          const hovered = turnNodes.find(function (n) { return n.id === foldHover; });
+          if (!hovered || !hovered.foldNodes || hovered.foldNodes.length === 0) return null;
+          const s = springs.current.get(hovered.id) || layout.pos.get(hovered.id) || { x: 0, y: 0 };
+          return React.createElement('div', {
+            className: 'mtx-outline',
+            key: 'fold-outline',
+            style: { transform: 'translate(' + (s.x + CARD_W / 2 + 6) + 'px,' + s.y + 'px)' },
+            onMouseEnter: function () { foldOutlineEnter(hovered.id); },
+            onMouseLeave: foldOutlineLeave,
+            onPointerDown: function (ev) { ev.stopPropagation(); },
+          },
+            React.createElement('div', { className: 'mtx-outline-head' }, cardTitle(hovered)),
+            React.createElement('div', { className: 'mtx-outline-list' },
+              hovered.foldNodes.map(function (hidden) {
+                return React.createElement('button', {
+                  key: hidden.id,
+                  type: 'button',
+                  className: 'mtx-outline-item',
+                  'data-turn': hidden.turn,
+                  onClick: function (ev) {
+                    ev.stopPropagation();
+                    setFoldHover(null);
+                    openVersion(hidden.id);
+                  },
+                },
+                  React.createElement('span', { className: 'mtx-outline-icon' },
+                    hidden.isRoot ? '●' : (hidden.operation === 'retry' ? '↻' : (hidden.operation === 'edit' ? '✎' : '💬'))),
+                  React.createElement('span', { className: 'mtx-outline-turn' }, t('turn', { turn: hidden.turn })),
+                  React.createElement('span', { className: 'mtx-outline-text' }, clip(hidden.text || '', 60))
+                );
+              })
+            )
+          );
+        })(),
         tree && tree.error ? React.createElement('div', { className: 'mtx-error' }, tree.error) : null,
         renameError ? React.createElement('div', { className: 'mtx-error' }, renameError) : null,
         // A degraded host is stated once, in place, rather than discovered by

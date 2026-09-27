@@ -122,9 +122,32 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
       current: el.hasAttribute('data-current'),
       head: el.hasAttribute('data-head'),
     }));
-  const tools = () => [...dom.window.document.querySelectorAll('.mtx-graph-tools .mtx-tool')];
-  const clickTool = (index) => act(async () => {
-    tools()[index].dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  // The panel has no toolbar any more. What was a button is now a branch's own
+  // right-click menu, and a fold opens its outline on hover.
+  const menuItems = () => [...dom.window.document.querySelectorAll('.mtx-menu-item')];
+  const openMenu = (id) => act(async () => {
+    const el = dom.window.document.querySelector('.mtx-card[data-id="' + id + '"]');
+    assert.ok(el, 'card ' + id + ' is drawn');
+    el.dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  });
+  const clickMenuItem = (label) => act(async () => {
+    const item = menuItems().find((el) => el.textContent === label);
+    assert.ok(item, 'menu item "' + label + '" exists');
+    item.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  });
+  // React implements onMouseEnter from mouseover, which is what a real hover
+  // sends first.
+  const hoverCard = (id) => act(async () => {
+    const el = dom.window.document.querySelector('.mtx-card[data-id="' + id + '"]');
+    assert.ok(el, 'card ' + id + ' is drawn');
+    el.dispatchEvent(new dom.window.MouseEvent('mouseover', { bubbles: true }));
+  });
+  const outlineItems = () => [...dom.window.document.querySelectorAll('.mtx-outline-item')];
+  const outlineTurns = () => outlineItems().map((el) => Number(el.getAttribute('data-turn')));
+  const clickOutline = (turn) => act(async () => {
+    const item = outlineItems().find((el) => el.getAttribute('data-turn') === String(turn));
+    assert.ok(item, 'outline row for turn ' + turn + ' exists');
+    item.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   });
   // Cards act on pointerup, the way the canvas does: press, release, done.
   const clickCard = (id) => act(async () => {
@@ -155,7 +178,8 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     return !!graph && graph.hasAttribute('data-panning');
   };
   return {
-    dom, cardIds, offsets, titles, links, tools, clickTool, clickCard, foldCard,
+    dom, cardIds, offsets, titles, links, clickCard, foldCard,
+    menuItems, openMenu, clickMenuItem, hoverCard, outlineItems, outlineTurns, clickOutline,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
     opened, workspaceOpened, tabClicks,
   };
@@ -213,7 +237,7 @@ const GAPPED_VERSIONS = [
   },
 ];
 
-test('the toolbar says what it does in a line, and asks before stopping work', async (t) => {
+test('collecting the other branches asks before stopping work', async (t) => {
   const posts = [];
   const view = await mountView(t, { dropEmptyForks: true }, VERSIONS, async (url, options) => {
     if (options && options.method === 'POST') {
@@ -227,14 +251,8 @@ test('the toolbar says what it does in a line, and asks before stopping work', a
     return { ok: true, json: async () => ({ versions: VERSIONS }) };
   });
 
-  const labels = view.tools().map((el) => el.getAttribute('title'));
-  assert.equal(labels.length, 5, 'filter, collect, fold, fit, refresh');
-  assert.ok(labels[0].length <= 24, 'the filter tooltip is a line, not a paragraph: ' + labels[0]);
-  assert.ok(view.tools()[0].querySelector('svg'), 'the filter uses an icon, not a punctuation mark');
-  assert.ok(view.tools()[1].querySelector('svg'), 'and so does collect');
-  assert.ok(view.tools()[2].querySelector('svg'), 'and the fold control');
-
-  await view.clickTool(1);
+  await view.openMenu('session-root#t5');
+  await view.clickMenuItem('Collect every other branch');
   assert.ok(posts.some((p) => p.action === 'demoteOthers'), 'collect asks the host');
   assert.ok(!posts.some((p) => p.stopRunning === true), 'and does not stop anything before the user says so');
   assert.ok(view.confirmTitle() !== null, 'a running branch is a question, not a silent kill');
@@ -258,7 +276,8 @@ test('the question can be dismissed, and its buttons are not drag handles', asyn
     return { ok: true, json: async () => ({ versions: VERSIONS }) };
   });
 
-  await view.clickTool(1);
+  await view.openMenu('session-root#t5');
+  await view.clickMenuItem('Collect every other branch');
   assert.ok(/^Running branches: 2[.]/.test(view.confirmTitle()), 'both running branches are named: ' + view.confirmTitle());
 
   await view.pressDown('.mtx-confirm-title');
@@ -272,7 +291,7 @@ test('the question can be dismissed, and its buttons are not drag handles', asyn
   assert.equal(view.confirmTitle(), null, 'Cancel closes the question');
 });
 
-test('a host that cannot hide sessions turns those controls off and says so', async (t) => {
+test('a host that cannot hide sessions turns that action off and says so', async (t) => {
   const degraded = {
     versions: VERSIONS,
     archiveSupport: { ok: false, read: true, hide: false, show: false, missing: ['workspaceRegistry.archiveSession'] },
@@ -282,17 +301,16 @@ test('a host that cannot hide sessions turns those controls off and says so', as
     json: async () => degraded,
   }));
 
-  const collect = view.tools()[1];
-  assert.equal(collect.disabled, true, 'collect is off rather than failing at click time');
+  await view.openMenu('session-root#t5');
+  const collect = view.menuItems().find((el) => el.textContent === 'Collect every other branch');
+  assert.ok(collect, 'the branch menu still offers it');
+  assert.equal(collect.disabled, true, 'but it is off rather than failing at click time');
   assert.ok((collect.getAttribute('title') || '').length > 0, 'and it says why on hover');
 
   const notice = view.dom.window.document.querySelector('.mtx-notice');
   assert.ok(notice, 'the panel states the degradation once, in place');
   assert.ok(notice.textContent.includes('workspaceRegistry.archiveSession'),
     'naming the missing piece: ' + notice.textContent);
-
-  // Filtering has nothing to do with the archive seam and must stay usable.
-  assert.equal(view.tools()[0].disabled, false, 'the filter still works');
 });
 
 test('reading a branch makes the shared history read as the same line', async (t) => {
@@ -337,17 +355,15 @@ test('a gap in the turn numbering does not orphan the chain', async (t) => {
     'only the conversation\'s own first turn hangs off the root — the fork hangs off turn 15');
 });
 
-test('a toggle is written with the current preference schema', async (t) => {
-  const view = await mountView(t, { dropEmptyForks: true });
-  assert.ok(!view.cardIds().includes('session-copy#fork'), 'the copy is hidden while the filter is on');
-
-  await view.clickTool(0);
-  assert.ok(view.cardIds().includes('session-copy#fork'), 'the switch draws it again');
-
-  const stored = JSON.parse(view.dom.window.localStorage.getItem('dsh-tree-view:prefs'));
-  assert.equal(stored.v, 3, 'the write carries the schema version, so a later read honours the choice');
-  assert.equal(stored.dropEmptyForks, false, 'and the toggle that was flipped');
-  assert.equal(stored.stopOnEdit, true, 'while the other toggles ride along in the same object');
+test('a threshold that was only ever v2 default follows the new one', async (t) => {
+  // Eight was v2's shipped value, so a stored eight is what everyone got rather
+  // than a decision, and v3 moves it with the default. A five-turn run never
+  // folds at eight and always does at two, which is what makes the move visible.
+  const line = Array.from({ length: 6 }, (_, i) => ({ turn: i + 1, text: 'turn ' + (i + 1), time: i + 1 }));
+  const view = await mountView(t, { v: 2, foldSharedAt: 8, dropEmptyForks: true },
+    [{ sessionId: 'session-root', createdAt: 1, current: true, turns: line }]);
+  assert.ok(view.foldCard(), 'the stored old default moved with the new one');
+  assert.ok(!view.cardIds().includes('session-root#t1'), 'so the shared stretch folds');
 });
 
 test('a long shared history is drawn as one node', async (t) => {
@@ -375,31 +391,32 @@ test('a long shared history is drawn as one node', async (t) => {
   }
 });
 
-test('the fold opens when clicked, and the toolbar can close it again', async (t) => {
+test('a fold opens its outline on hover, and clicking it changes nothing', async (t) => {
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' });
   const foldId = view.foldCard().getAttribute('data-id');
 
+  // Clicking used to redraw the whole canvas. It must leave the fold alone now:
+  // the outline is how the turns inside it are read, not a drawer to open.
   await view.clickCard(foldId);
-  assert.equal(view.foldCard(), null, 'unfolded: no fold card is left');
-  assert.ok(view.cardIds().includes('session-root#t5'), 'and the shared turns are drawn again');
-  assert.equal(view.tools()[2].getAttribute('data-on'), null, 'the toolbar reports it as open');
+  assert.ok(view.foldCard(), 'clicking a fold leaves it folded');
+  assert.ok(!view.cardIds().includes('session-root#t5'), 'and the turns it hides stay off the canvas');
+  assert.equal(view.outlineItems().length, 0, 'and nothing was opened');
 
-  await view.clickTool(2);
-  assert.ok(view.foldCard(), 'the toolbar folds it again');
-  assert.ok(!view.cardIds().includes('session-root#t5'), 'the shared turns are off the canvas again');
-  assert.equal(view.tools()[2].getAttribute('data-on'), '', 'and the toolbar reports it as folded');
+  await view.hoverCard(foldId);
+  assert.deepEqual(view.outlineTurns(), Array.from({ length: 14 }, (_, i) => i + 1),
+    'hovering lists the turns it hides, in order');
+
+  // Picking a row reaches that turn. It belongs to the version already on screen,
+  // so the panel only sends the chat there rather than switching anything.
+  await view.clickOutline(3);
+  assert.ok(view.tabClicks.length > 0, 'choosing a row goes back to the Chat tab');
+  assert.equal(view.outlineItems().length, 0, 'and the outline closes behind it');
 });
 
-test('a run below the threshold is never folded, not even by hand', async (t) => {
-  // Reported: a three-turn run folded. The threshold decides, for the automatic
-  // fold and for the toolbar alike — the control is not a way around it.
+test('a run below the threshold is never folded', async (t) => {
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 20 });
   assert.equal(view.foldCard(), null, 'a shared stretch below the threshold is left alone');
   assert.ok(view.cardIds().includes('session-root#t5'), 'so its turns are on the canvas');
-  assert.equal(view.tools()[2].disabled, true, 'and the control says there is nothing long enough');
-
-  await view.clickTool(2);
-  assert.equal(view.foldCard(), null, 'pressing it folds nothing either');
 });
 
 test('a subagent conversation is marked as one', async (t) => {
@@ -459,29 +476,6 @@ const LONG_LINE = [
     turns: [1, 2, 3, 4, 5, 6, 7].map((turn) => ({ turn, text: 'fork ' + turn, time: turn })),
   },
 ];
-
-test('folding and unfolding reframes the canvas', async (t) => {
-  // One click can hide or reveal dozens of turns; without a re-fit the tree walks
-  // off the canvas and the reader has to hunt for it with ⌖.
-  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, LONG_LINE);
-  const scale = () => {
-    const world = view.dom.window.document.querySelector('.mtx-world');
-    const m = world && /scale\(([\d.]+)\)/.exec(world.style.transform);
-    return m ? Number(m[1]) : null;
-  };
-
-  const foldedScale = scale();
-  assert.ok(foldedScale > 0, 'the folded tree is framed: ' + foldedScale);
-
-  await view.clickCard(view.foldCard().getAttribute('data-id'));
-  const unfoldedScale = scale();
-  assert.ok(unfoldedScale > 0, 'and so is the unfolded one: ' + unfoldedScale);
-  assert.ok(unfoldedScale < foldedScale,
-    'unfolding frames the bigger tree instead of keeping the folded zoom: ' + foldedScale + ' -> ' + unfoldedScale);
-
-  await view.clickTool(2);
-  assert.ok(scale() > unfoldedScale, 'folding again zooms back in: ' + scale());
-});
 
 test('a coincidental repeat does not drag a fork down the parent line', async (t) => {
   // Reported: the branch named "readme" was attached after the current session
@@ -544,11 +538,11 @@ test('a long run on one branch folds too, not only the shared history', async (t
   assert.equal((links.find((l) => l.id === 'session-root#t30') || {}).head, true,
     'the head of the line is never hidden inside a fold');
 
-  await view.clickTool(2);
-  assert.equal(cards().length, 0, 'the toolbar unfolds the stretches');
-  await view.clickTool(2);
-  assert.equal(cards().length, 2, 'and folds them again');
-  assert.ok(!view.cardIds().includes('session-root#t1'), 'the shared run stays folded throughout');
+  // There is no in-place unfold to toggle any more: what matters is that both
+  // stretches are drawn as folds at the default threshold, and that the head and
+  // the fork point survive them.
+  assert.ok(!view.cardIds().includes('session-root#t1'), 'the shared run stays folded');
+  assert.ok(!view.cardIds().includes('session-root#t20'), 'and so does the long run');
 });
 
 // A tag is the reader saying "this turn matters". A fold is the tree saying
@@ -642,7 +636,7 @@ test('a version that is still generating a reply is left alone', async (t) => {
     'the version you clicked is still brought out');
 });
 
-test('a family with nothing worth folding keeps the control out of the way', async (t) => {
+test('a family with nothing worth folding draws no fold and no outline', async (t) => {
   // Two turns and no branches: the only thing a fold could hide is one turn,
   // which trades a card for a card.
   const flat = [{
@@ -656,7 +650,8 @@ test('a family with nothing worth folding keeps the control out of the way', asy
   }];
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, flat, undefined, 'session-only');
   assert.equal(view.foldCard(), null, 'nothing is folded');
-  assert.equal(view.tools()[2].disabled, true, 'and the fold control says it has nothing to do');
+  await view.hoverCard('session-only#t1');
+  assert.equal(view.outlineItems().length, 0, 'and a plain card opens no outline at all');
 });
 
 test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions.open', async (t) => {
