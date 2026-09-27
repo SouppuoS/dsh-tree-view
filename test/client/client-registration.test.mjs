@@ -4,8 +4,8 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { Context } from '@deepseek-ai/cordis';
 
-const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+const bundle = readFileSync(new URL('../../lib/client.js', import.meta.url), 'utf8');
 
 function load() {
   let plugin;

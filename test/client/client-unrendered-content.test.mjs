@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 
-const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+const bundle = readFileSync(new URL('../../lib/client.js', import.meta.url), 'utf8');
 const text = value => ({ type: 'text', text: value });
 
 // The bubble is this plugin's own renderer, so the failure mode under test is

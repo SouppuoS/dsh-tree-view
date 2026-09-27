@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { sessionEvents, sessionEventCount, sessionRecord, readSessionRecord } from '../lib/session-record.js';
+import { sessionEvents, sessionEventCount, sessionRecord, readSessionRecord } from '../../lib/session-record.js';
 
 test('live snapshot API takes precedence over a retired events getter', () => {
   const events = Object.freeze([]);

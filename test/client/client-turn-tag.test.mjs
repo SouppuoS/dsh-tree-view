@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 
-const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+const bundle = readFileSync(new URL('../../lib/client.js', import.meta.url), 'utf8');
 
 // The tag button is one entry in the assistant action row DSH already draws. It
 // receives a durable message id and nothing else, so these tests are about the

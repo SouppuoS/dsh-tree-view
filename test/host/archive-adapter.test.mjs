@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { hiddenIds, hide, probe, show, support } from '../lib/archive-adapter.js';
+import { hiddenIds, hide, probe, show, support } from '../../lib/archive-adapter.js';
 
 // A registry that looks like this build's WorkspaceRegistry: the archive set,
 // the supported archive call, and the state discipline unarchiving needs.

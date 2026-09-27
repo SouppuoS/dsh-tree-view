@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 
-const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+const bundle = readFileSync(new URL('../../lib/client.js', import.meta.url), 'utf8');
 const photo = id => ({ type: 'image', attachment: { id, mimeType: 'image/png' } });
 const text = value => ({ type: 'text', text: value });
 

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { headOf, scanHeadCommits } from '../lib/git-state.js';
+import { headOf, scanHeadCommits } from '../../lib/git-state.js';
 
 const scratch = () => mkdtempSync(join(tmpdir(), 'tree-view-git-'));
 const SHA = (c) => c.repeat(40);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+const bundle = readFileSync(new URL('../../lib/client.js', import.meta.url), 'utf8');
 
 // The bug this guards: the canvas kept `will-change: transform` on the world (and
 // on every card) for good. A promoted layer is rasterised once and then stretched

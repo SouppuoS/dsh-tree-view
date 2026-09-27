@@ -1,4 +1,4 @@
-import { attachParentId, ringFor, rootOf, ancestorChainFromLog, collectFamily, buildTurnTree } from '../lib/tree-logic.js';
+import { attachParentId, ringFor, rootOf, ancestorChainFromLog, collectFamily, buildTurnTree } from '../../lib/tree-logic.js';
 
 function node(id, parentSessionId, targetTurn) {
   return { sessionId: id, parentSessionId, targetTurn, createdAt: 0 };

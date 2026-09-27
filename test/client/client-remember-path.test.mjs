@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 
-const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+const bundle = readFileSync(new URL('../../lib/client.js', import.meta.url), 'utf8');
 
 // One family (root + an edited branch) and a second conversation that is not
 // part of it. Reported twice, in two shapes:

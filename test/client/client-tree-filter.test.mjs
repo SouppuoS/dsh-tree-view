@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 
-const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+const bundle = readFileSync(new URL('../../lib/client.js', import.meta.url), 'utf8');
 
 // A conversation, a photocopy of it (a fork with no turns of its own), and a
 // fork that kept talking. The photocopy is what the "hide forks with no new

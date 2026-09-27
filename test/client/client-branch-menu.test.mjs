@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 
-const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+const bundle = readFileSync(new URL('../../lib/client.js', import.meta.url), 'utf8');
 
 const VERSIONS = [
   { sessionId: 'session-root', createdAt: 1, current: true, turns: [{ turn: 1, text: 'root turn', time: 1 }] },

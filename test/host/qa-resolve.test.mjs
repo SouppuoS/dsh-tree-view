@@ -7,7 +7,7 @@ import test from 'node:test';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createQaResolver } from './fixtures/qa-resolve.mjs';
+import { createQaResolver } from '../fixtures/qa-resolve.mjs';
 
 const moduleFile = name => JSON.stringify({ name, version: '1.0.0', main: 'index.js' });
 

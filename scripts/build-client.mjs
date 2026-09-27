@@ -1,8 +1,8 @@
-// Generate lib/client.js from plugin.client.js.
+// Generate lib/client.js from src/client.js.
 //
 // The shipped client is the authored fragment wrapped in the module-loader
 // preamble. That wrapping used to be applied by hand, which means the two files
-// can drift: editing plugin.client.js alone changes nothing at runtime, because
+// can drift: editing src/client.js alone changes nothing at runtime, because
 // only lib/client.js is loaded. Regenerating makes the fragment the single
 // source of truth.
 //
@@ -44,7 +44,7 @@ const EPILOGUE = `
 });
 `;
 
-const fragment = readFileSync(join(root, 'plugin.client.js'), 'utf8');
+const fragment = readFileSync(join(root, 'src', 'client.js'), 'utf8');
 const out = PROLOGUE + fragment + EPILOGUE;
 const target = join(root, 'lib', 'client.js');
 

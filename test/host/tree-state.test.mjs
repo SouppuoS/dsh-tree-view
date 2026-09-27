@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 
-import { apply } from '../lib/index.js';
+import { apply } from '../../lib/index.js';
 import {
   LABEL_MAX_LENGTH,
   TAG_NOTE_MAX_LENGTH,
@@ -19,7 +19,7 @@ import {
   setTag,
   stateFilePath,
   writeState,
-} from '../lib/tree-state.js';
+} from '../../lib/tree-state.js';
 
 const scratch = () => mkdtempSync(join(tmpdir(), 'tree-view-state-'));
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
-import { apply } from '../lib/index.js';
+import { apply } from '../../lib/index.js';
 
 // Exercise the public HTTP route with both documented DSH session shapes.
 // Lifecycle/model execution is a double; real-runtime acceptance is separate.

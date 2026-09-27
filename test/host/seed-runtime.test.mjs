@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { Session, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session';
-import { apply } from '../lib/index.js';
+import { apply } from '../../lib/index.js';
 
 test('real DSH 0.1.5 constructor accepts a branch and setup clears rewound input before publication', async () => {
   const header = { version: SESSION_FORMAT_VERSION, id: 'source', createdAt: 1,

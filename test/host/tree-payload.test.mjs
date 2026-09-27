@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 
-import { apply } from '../lib/index.js';
-import { setDemoted, setLabel, stateFilePath } from '../lib/tree-state.js';
+import { apply } from '../../lib/index.js';
+import { setDemoted, setLabel, stateFilePath } from '../../lib/tree-state.js';
 
 // The sidecar is read while the payload is built, so point DSH_HOME at a
 // scratch directory: a test must never read or write the real one.
