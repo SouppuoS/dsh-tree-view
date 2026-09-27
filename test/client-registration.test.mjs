@@ -39,7 +39,7 @@ test('declared client dependencies make the UI services available for registrati
     get: name => name === 'slots' && pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-renderer') ? slots
       : name === 'sessions' && pkg.dsh.client.inject.includes('@deepseek-ai/dsh-api-session-controller') ? { open() {} } : undefined,
   }));
-  assert.deepEqual(registered, ['settings.section', 'conversation.chat.node', 'conversation.view']);
+  assert.deepEqual(registered, ['settings.section', 'conversation.chat.node', 'conversation.view', 'conversation.chat.assistant-actions']);
 });
 
 test('a missing slots service fails visibly instead of silently disabling the module', () => {
@@ -64,13 +64,13 @@ test('the client applies without the session service, and takes it when it arriv
   const fiber = ctx.plugin(plugin);
   await fiber;
   assert.equal(fiber.state, 2, 'the client applies as soon as its essential service is there');
-  assert.deepEqual(registered, ['settings.section', 'conversation.chat.node', 'conversation.view']);
+  assert.deepEqual(registered, ['settings.section', 'conversation.chat.node', 'conversation.view', 'conversation.chat.assistant-actions']);
 
   // The optional service lands later; nothing about the applied plugin breaks.
   ctx.provide('sessions', { list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: {} }) } });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(fiber.state, 2);
-  assert.deepEqual(registered, ['settings.section', 'conversation.chat.node', 'conversation.view']);
+  assert.deepEqual(registered, ['settings.section', 'conversation.chat.node', 'conversation.view', 'conversation.chat.assistant-actions']);
 });
 
 test('a user-renderer collision is reported while the other UI entries still register', () => {
@@ -86,7 +86,7 @@ test('a user-renderer collision is reported while the other UI entries still reg
       },
     } : name === 'sessions' ? { open() {} } : undefined,
   }));
-  assert.deepEqual(registered, ['settings.section', 'conversation.view']);
+  assert.deepEqual(registered, ['settings.section', 'conversation.view', 'conversation.chat.assistant-actions']);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0][0], /editing is unavailable/);
 });

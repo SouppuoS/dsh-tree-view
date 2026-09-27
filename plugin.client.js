@@ -155,7 +155,11 @@ let lastViewedSessionId;
 // version, and it exists for one migration: `rememberPath` shipped on, and it
 // navigated the app away from the conversation you had just clicked. Reading a
 // conversation must not move you somewhere else, so it now defaults to off.
-const PREFS_VERSION = 2;
+// v3 exists for a second migration: folding used to be a long-stretch tidy-up
+// that started at eight turns, and it now hides every turn that is neither the
+// one being read nor tagged. A stored threshold that was only ever the old
+// default follows the new one; a number the reader chose is kept.
+const PREFS_VERSION = 3;
 const PREFS_KEY = 'dsh-tree-view:prefs';
 const PREFS_DEFAULTS = {
   // Jump back to the branch you last had open when you come back to its family.
@@ -171,9 +175,11 @@ const PREFS_DEFAULTS = {
   dropEmptyForks: true,
   // Straight stretches longer than this fold into a single node (0 = never
   // fold). That covers the shared history above the first fork and the
-  // unbranched run any one branch continues on. A fold node unfolds again, and
-  // the toolbar can fold any stretch by hand.
-  foldSharedAt: 8,
+  // unbranched run any one branch continues on. The latest turn of the session
+  // being read and every tagged turn are never hidden inside one, so the default
+  // of two — the smallest run a fold can hide — draws what the reader came for
+  // and folds the rest. A fold node unfolds again, and the toolbar folds by hand.
+  foldSharedAt: 2,
 };
 
 // The preferences that hold a number rather than a switch.
@@ -195,15 +201,24 @@ const prefsStore = {
       // — and the two cannot be told apart. That one stored value is dropped so
       // the new default takes effect; every other toggle survives, and turning
       // this one on again writes the current version and is honoured from then
-      // on. (Only `rememberPath` changed meaning: a stored preference is
-      // otherwise never taken away from the user.)
+      // on. v3 moves one more value, and only when it cannot have been a choice:
+      // see the foldSharedAt migration below.
       const current = !!parsed && parsed.v === PREFS_VERSION;
+      // rememberPath is dropped only when migrating from BEFORE v2: that is the
+      // one schema whose default it was, so a stored true cannot be told from the
+      // default there. From v2 on it is a deliberate choice and survives.
+      const storedVersion = parsed && typeof parsed.v === 'number' ? parsed.v : 1;
       const out = {};
       for (const k in PREFS_DEFAULTS) {
         const kindOk = !!parsed
           && (PREFS_NUMBERS[k] ? typeof parsed[k] === 'number' : typeof parsed[k] === 'boolean');
-        const usable = kindOk && (current || k !== 'rememberPath');
-        out[k] = usable ? parsed[k] : PREFS_DEFAULTS[k];
+        let stored = parsed ? parsed[k] : undefined;
+        // Eight was v2's default, so a stored eight is the value everyone got,
+        // not a decision. Move it with the default so the new folding takes
+        // effect; a deliberately chosen number is left alone.
+        if (k === 'foldSharedAt' && parsed && parsed.v === 2 && stored === 8) stored = PREFS_DEFAULTS.foldSharedAt;
+        const usable = kindOk && (storedVersion >= 2 || k !== 'rememberPath');
+        out[k] = usable ? stored : PREFS_DEFAULTS[k];
       }
       this.value = out;
     }
@@ -238,7 +253,7 @@ const foldModes = new Map();
 
 // What the fold threshold can be. 0 means "never fold on its own"; the toolbar
 // button folds by hand either way.
-const FOLD_CHOICES = [0, 5, 8, 12, 20];
+const FOLD_CHOICES = [0, 2, 5, 8, 12, 20];
 
 function usePrefs() {
   const [, force] = React.useReducer(function (x) { return x + 1; }, 0);
@@ -295,7 +310,7 @@ const treeStore = {
     }
   },
 
-  setTree(sessionId, versions, timestamp, archiveSupport) {
+  setTree(sessionId, versions, timestamp, archiveSupport, messageTags) {
     if (!Array.isArray(versions)) versions = [];
     const rootId = rootOf(versions, sessionId) || sessionId;
     const updatedAt = typeof timestamp === 'number' ? timestamp : Date.now();
@@ -313,6 +328,10 @@ const treeStore = {
       // The host's capability report travels with the payload: the panel uses
       // it to disable what cannot work.
       archiveSupport: archiveSupport ?? (existingRoot && existingRoot.archiveSupport) ?? null,
+      // Tags travel the same way, keyed by the message the chat action row
+      // knows. The tree reads them off its turn nodes; the button reads them
+      // here, because the row hands it an id and nothing else.
+      messageTags: messageTags ?? (existingRoot && existingRoot.messageTags) ?? {},
     };
     this.byRoot.set(rootId, entry);
 
@@ -365,7 +384,7 @@ const treeStore = {
         const res = await g.fetch(ROUTE + '?sessionId=' + encodeURIComponent(sessionId), { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        self.setTree(sessionId, data.versions, reqTime, data.archiveSupport);
+        self.setTree(sessionId, data.versions, reqTime, data.archiveSupport, data.messageTags);
       } catch (e) {
         const errStr = String((e && e.message) || e);
         const prev = self.bySession.get(sessionId);
@@ -375,6 +394,7 @@ const treeStore = {
           error: errStr,
           updatedAt: prev ? prev.updatedAt : 0,
           archiveSupport: prev ? prev.archiveSupport : null,
+          messageTags: prev ? prev.messageTags : {},
         });
         self.notify();
       } finally {
@@ -694,6 +714,32 @@ function reportUnrenderedContent(content) {
     + 'block types: ' + (types.length > 0 ? types.join(', ') : summary));
 }
 
+/**
+ * A tag's note, as the reader wrote it.
+ *
+ * A note is Markdown because that is what a developer reaches for, but this is a
+ * label on a canvas card, not a document: only the inline spans are honoured, and
+ * every piece is built as a React element, so nothing a note contains can become
+ * markup. Links stay literal text on purpose — a card that navigates away on a
+ * stray click is worse than one that shows the URL.
+ */
+function markdownLite(text) {
+  const out = [];
+  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  let at = 0;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > at) out.push(text.slice(at, match.index));
+    const token = match[0];
+    if (token.startsWith('**')) out.push(React.createElement('strong', { key: match.index }, token.slice(2, -2)));
+    else if (token.charAt(0) === '`') out.push(React.createElement('code', { key: match.index }, token.slice(1, -1)));
+    else out.push(React.createElement('em', { key: match.index }, token.slice(1, -1)));
+    at = match.index + token.length;
+  }
+  if (at < text.length) out.push(text.slice(at));
+  return out;
+}
+
 function clip(text, max) {
   const t = String(text).replace(/\s+/g, ' ').trim();
   return t.length > max ? t.slice(0, max - 1) + '…' : t;
@@ -849,6 +895,7 @@ function buildTurnTree(versions, currentSessionId, options) {
           turn: t.turn,
           time: t.time || v.createdAt,
           text: t.text || '',
+          tag: t.tag || undefined,
           current: isCurrentSession,
           onCurrentPath: false,
           deleted: !!v.deleted,
@@ -906,6 +953,7 @@ function buildTurnTree(versions, currentSessionId, options) {
           operation: isForkTurn ? v.operation : undefined,
           text: t.text || (isForkTurn ? (v.after || v.before || '') : ''),
           time: t.time || v.createdAt,
+          tag: t.tag || undefined,
           current: isCurrentSession,
           onCurrentPath: false,
           deleted: !!v.deleted,
@@ -1036,7 +1084,9 @@ function foldLongRuns(nodes, minHidden) {
   function kidsOf(n) { return children.get(n.id) || []; }
   // A pass-through is a turn that neither decides anything nor is a landmark.
   function passThrough(n) {
-    return kidsOf(n).length === 1 && !n.isRoot && n.head !== true;
+    // A tagged turn is a landmark the reader put there on purpose, so a fold
+    // must never swallow it — the same reason the latest turn is excluded.
+    return kidsOf(n).length === 1 && !n.isRoot && n.head !== true && n.tag === undefined;
   }
 
   const hiddenIds = new Set();
@@ -1263,6 +1313,19 @@ const CSS = [
   // where it can always be seen: a small accent tag on the card's top edge. It
   // floats, so a long title or subtitle never pushes it out of the way.
   '.mtx-card-tag{position:absolute;top:-8px;right:8px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:600;line-height:15px;color:var(--mtx-on-accent);background:var(--mtx-accent);box-shadow:0 1px 4px var(--mtx-shadow);white-space:nowrap}',
+  // A tagged turn is a landmark the reader put there on purpose: it keeps the
+  // accent the app already uses for "the line you are reading" and adds a badge
+  // and its note, so it is told apart from the current turn by what it says.
+  '.mtx-card[data-tag]{border-color:var(--mtx-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--mtx-accent) 55%,transparent),0 6px 22px color-mix(in srgb,var(--mtx-accent) 22%,transparent)}',
+  '.mtx-card[data-tag] .mtx-card-icon{background:color-mix(in srgb,var(--mtx-accent) 20%,transparent);color:var(--mtx-accent)}',
+  '.mtx-card-mark{position:absolute;top:-8px;left:8px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:600;line-height:15px;color:var(--mtx-on-accent);background:var(--mtx-accent)}',
+  '.mtx-card-note{display:block;margin-top:5px;padding-top:5px;border-top:1px solid color-mix(in srgb,currentColor 20%,transparent);font-size:11px;line-height:15px;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary));white-space:pre-wrap;overflow-wrap:anywhere;max-height:62px;overflow:hidden}',
+  '.mtx-card-note code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;background:color-mix(in srgb,currentColor 14%,transparent);border-radius:4px;padding:0 3px}',
+  '.mtx-tag-act[data-tagged]{color:var(--mtx-accent)}',
+  '.mtx-tag-edit{display:flex;flex-direction:column;gap:6px;margin-top:8px;width:min(85%,720px)}',
+  '.mtx-tag-input{width:100%;box-sizing:border-box;min-height:56px;resize:vertical;border:1px solid var(--mtx-line);border-radius:10px;padding:8px 10px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;line-height:18px}',
+  '.mtx-tag-actions{display:flex;justify-content:flex-end;gap:8px}',
+  '.mtx-tag-error{font-size:11px;color:var(--mtx-danger)}',
   '.mtx-group{position:absolute;left:0;top:0;box-sizing:border-box;border:1px dashed color-mix(in srgb,var(--mtx-accent) 45%,transparent);border-radius:20px;background:color-mix(in srgb,var(--mtx-accent) 7%,transparent);z-index:0;pointer-events:none}',
   '.mtx-group-name{position:absolute;left:14px;top:-10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 9px;border-radius:9px;font-size:11.5px;font-weight:600;color:var(--mtx-accent);background:var(--mtx-surface);border:1px solid color-mix(in srgb,var(--mtx-accent) 45%,transparent)}',
   '.mtx-menu{position:absolute;left:0;top:0;z-index:9;display:flex;flex-direction:column;min-width:148px;padding:4px;border-radius:11px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 34%,transparent);background:var(--mtx-surface);box-shadow:0 10px 30px var(--mtx-shadow-strong)}',
@@ -1491,6 +1554,13 @@ return {
         menuPromote: 'Move to main chat',
         menuDemote: 'Collect into the tree',
         menuDemoteOpen: 'This is the conversation you have open',
+        tagBadge: 'tag',
+        tagAdd: 'Tag this turn',
+        tagRemove: 'Remove the tag',
+        tagNotePlaceholder: 'Note (Markdown), optional',
+        tagSave: 'Save',
+        tagFailed: 'Tag failed: {message}',
+        tagRemoveFailed: 'Removing the tag failed: {message}',
         moveFailed: 'Move failed: {message}',
         contentUnavailable: 'This message has a shape this build cannot draw. See the console for the block types it received.',
         previewUser: 'Rewrite this paragraph to be more concise.',
@@ -1562,6 +1632,13 @@ return {
         menuPromote: '放到主对话',
         menuDemote: '收到 Tree 里',
         menuDemoteOpen: '这就是你当前打开的会话',
+        tagBadge: '标记',
+        tagAdd: '标记这一轮',
+        tagRemove: '取消标记',
+        tagNotePlaceholder: '备注（Markdown，可留空）',
+        tagSave: '保存',
+        tagFailed: '标记失败：{message}',
+        tagRemoveFailed: '取消标记失败：{message}',
         moveFailed: '移动失败：{message}',
         contentUnavailable: '这条消息的格式此版本无法绘制；控制台里记下了它实际收到的块类型。',
         previewUser: '把这段话改写得更简洁一些。',
@@ -1642,6 +1719,17 @@ return {
           d: 'M8 6.4v5.6m0 0-1.8-1.8M8 12l1.8-1.8', stroke: 'currentColor', strokeWidth: 1.3,
           strokeLinecap: 'round', strokeLinejoin: 'round',
         }));
+    }
+
+    /** A tag glyph, drawn like the row's other icons so it sits in the row. */
+    function TagIcon() {
+      return React.createElement('svg', { width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
+        React.createElement('path', {
+          d: 'M2.7 2.7h5.1l5.5 5.5-5.1 5.1-5.5-5.5z',
+          stroke: 'currentColor', strokeWidth: 1.3, strokeLinejoin: 'round',
+        }),
+        React.createElement('circle', { cx: 5.5, cy: 5.5, r: 1, fill: 'currentColor' })
+      );
     }
 
     function PencilIcon() {
@@ -2603,6 +2691,7 @@ return {
               // says so in the open, and says it in the subtitle too, so a chain
               // of its turns is recognisable at a glance.
               'data-subagent': n.subagent || undefined,
+              'data-tag': n.tag ? '' : undefined,
               title: n.deleted ? undefined : (n.fold ? t('foldExpandHint') : t('menuHint')),
               onContextMenu: function (ev) {
                 ev.preventDefault();
@@ -2619,12 +2708,19 @@ return {
                 // A folded stretch is one line by design: the turns it hides are
                 // not there to be described, and the pill says "click me" by
                 // shape. Every other node keeps its subtitle.
-                n.fold ? null : React.createElement('span', { className: 'mtx-card-sub' }, sub)
+                n.fold ? null : React.createElement('span', { className: 'mtx-card-sub' }, sub),
+                // A note is the point of a tag, so it is drawn rather than kept
+                // behind a hover: it is the one thing a tagged turn says that
+                // nothing else on the canvas says.
+                n.tag && n.tag.note
+                  ? React.createElement('span', { className: 'mtx-card-note' }, markdownLite(n.tag.note))
+                  : null
               ),
               n.fold ? React.createElement('span', { className: 'mtx-fold-cue' }, '⌄') : null,
               // The tag rides on the card's top edge: this conversation belongs to
               // a subagent, not to a version of the reader's message.
-              n.subagent ? React.createElement('span', { className: 'mtx-card-tag' }, t('subagentTag')) : null
+              n.subagent ? React.createElement('span', { className: 'mtx-card-tag' }, t('subagentTag')) : null,
+              n.tag ? React.createElement('span', { className: 'mtx-card-mark' }, t('tagBadge')) : null
             );
           }),
           // The rename editor renders inside the world so it inherits the same
@@ -2781,6 +2877,103 @@ return {
 
     // Settings: pick the edit-interface style, with a live preview that
     // renders in the currently-selected look.
+    /**
+     * The tag button, seated in the assistant action row DSH already draws.
+     *
+     * The row hands this component one durable message id and nothing else, so
+     * the tag is written against that id and the host resolves which turn it
+     * belongs to. A tag names a turn and may carry a Markdown note; clicking a
+     * tagged turn again takes it off — the same gesture that put it there.
+     */
+    function TurnTagAction(props) {
+      const messageId = props.messageId;
+      const sessionId = props.sessionId;
+      // The family payload the tree already draws from carries the tags keyed by
+      // message, which is the only key this row has.
+      const tree = useTree(sessionId);
+      const tag = tree && tree.messageTags ? tree.messageTags[messageId] : undefined;
+      const [draft, setDraft] = React.useState(null);
+      const [busy, setBusy] = React.useState(false);
+      const [error, setError] = React.useState(null);
+
+      function report(failure, key) {
+        setError(t(key, { message: String((failure && failure.message) || failure) }));
+      }
+
+      function refresh() {
+        if (sessionId) treeStore.load(sessionId);
+      }
+
+      function put(note, after) {
+        setBusy(true);
+        setError(null);
+        return mutate({ action: 'tag', sessionId: sessionId, messageId: messageId, note: note })
+          .then(function () { refresh(); if (after) after(); })
+          .catch(function (failure) { report(failure, 'tagFailed'); })
+          .finally(function () { setBusy(false); });
+      }
+
+      function remove() {
+        setBusy(true);
+        setError(null);
+        return mutate({ action: 'untag', sessionId: sessionId, messageId: messageId })
+          .then(refresh)
+          .catch(function (failure) { report(failure, 'tagRemoveFailed'); })
+          .finally(function () { setBusy(false); });
+      }
+
+      // The editor replaces the button while it is open, so the note is written
+      // in place rather than in a dialog the canvas would have to host.
+      if (draft !== null) {
+        return React.createElement('span', { className: 'mtx-tag-edit' },
+          React.createElement('textarea', {
+            className: 'mtx-tag-input',
+            value: draft,
+            autoFocus: true,
+            placeholder: t('tagNotePlaceholder'),
+            onChange: function (event) { setDraft(event.target.value); },
+            onKeyDown: function (event) {
+              if (event.key === 'Escape') { event.preventDefault(); setDraft(null); }
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                put(draft, function () { setDraft(null); });
+              }
+            },
+          }),
+          React.createElement('span', { className: 'mtx-tag-actions' },
+            React.createElement('button', {
+              type: 'button', className: 'mtx-btn', disabled: busy || undefined,
+              onClick: function () { put(draft, function () { setDraft(null); }); },
+            }, t('tagSave')),
+            React.createElement('button', {
+              type: 'button', className: 'mtx-btn', disabled: busy || undefined,
+              onClick: function () { setDraft(null); },
+            }, t('cancel'))
+          ),
+          error ? React.createElement('span', { className: 'mtx-tag-error' }, error) : null
+        );
+      }
+
+      return React.createElement('span', { className: 'mtx-tag' },
+        React.createElement('button', {
+          type: 'button',
+          className: 'mtx-act mtx-tag-act',
+          'data-tagged': tag ? '' : undefined,
+          'aria-pressed': tag ? 'true' : 'false',
+          title: tag ? t('tagRemove') : t('tagAdd'),
+          disabled: busy || undefined,
+          onClick: function () {
+            // Tag first, then offer the note: the tag is the point and the note
+            // is optional, and leaving the editor open is what lets the reader
+            // add one without a second gesture.
+            if (tag) { remove(); return; }
+            put('', function () { setDraft(''); });
+          },
+        }, TagIcon()),
+        error ? React.createElement('span', { className: 'mtx-tag-error' }, error) : null
+      );
+    }
+
     function Toggle(props) {
       return React.createElement(React.Fragment, null,
         React.createElement('div', { className: 'mtx-set-row' },
@@ -2912,6 +3105,21 @@ return {
           inject: function (sessionId) { return { sessionId: sessionId }; },
         },
         VersionsView
+      );
+    });
+
+    // The action row is DSH's own: this ADDS one entry to it instead of taking
+    // the row over, so every built-in control keeps working and a host upgrade
+    // cannot leave the row half-drawn.
+    slots.inject('conversation.chat.assistant-actions', function () {
+      return slots.register(
+        {
+          name: 'conversation.chat.assistant-actions',
+          id: 'tree-tag',
+          order: 20,
+          inject: function (sessionId) { return { sessionId: sessionId }; },
+        },
+        TurnTagAction
       );
     });
   }

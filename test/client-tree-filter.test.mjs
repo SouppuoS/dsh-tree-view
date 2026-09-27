@@ -345,7 +345,7 @@ test('a toggle is written with the current preference schema', async (t) => {
   assert.ok(view.cardIds().includes('session-copy#fork'), 'the switch draws it again');
 
   const stored = JSON.parse(view.dom.window.localStorage.getItem('dsh-tree-view:prefs'));
-  assert.equal(stored.v, 2, 'the write carries the schema version, so a later read honours the choice');
+  assert.equal(stored.v, 3, 'the write carries the schema version, so a later read honours the choice');
   assert.equal(stored.dropEmptyForks, false, 'and the toggle that was flipped');
   assert.equal(stored.stopOnEdit, true, 'while the other toggles ride along in the same object');
 });
@@ -519,23 +519,26 @@ test('a coincidental repeat does not drag a fork down the parent line', async (t
 test('a long run on one branch folds too, not only the shared history', async (t) => {
   // 30 turns on the conversation with one small fork at turn 5: the shared
   // history is turns 1..4, and turns 6..29 are the unbranched run that only this
-  // line continues on. Neither of them decides anything, so both fold.
+  // line continues on. Neither decides anything, so with the default threshold of
+  // two — the smallest run a fold can hide — both fold, and what stays drawn is
+  // the origin, the fork point and the head.
   const longLine = LONG_LINE;
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, longLine);
   const cards = () => [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold]')];
   const titles = () => cards().map((c) => c.querySelector('.mtx-card-title').textContent);
 
-  assert.equal(cards().length, 1, 'only the long run is folded: ' + titles().join(' / '));
+  assert.equal(cards().length, 2, 'both stretches fold: ' + titles().join(' / '));
+  assert.ok(titles().includes('4 shared turns'), 'the shared history above the fork: ' + titles().join(' / '));
   assert.ok(titles().includes('24 turns in a row'), 'the run this branch continues on: ' + titles().join(' / '));
 
   const ids = view.cardIds();
   assert.ok(ids.includes('session-root#t30'), 'the turn you are at stays drawn');
   assert.ok(!ids.includes('session-root#t20'), 'the middle of the long run is hidden');
   assert.ok(ids.includes('session-root#t5'), 'while the turn the branches part at stays');
-  assert.ok(ids.includes('session-root#t1'), 'and a short run stays drawn — the threshold is per run');
+  assert.ok(!ids.includes('session-root#t1'), 'and so is the middle of the shared history');
 
   const links = view.links();
-  const runFold = cards()[0].getAttribute('data-id');
+  const runFold = cards()[1].getAttribute('data-id');
   assert.equal((links.find((l) => l.id === runFold) || {}).parent, 'session-root#t5',
     'the run fold hangs off the turn before it');
   assert.equal((links.find((l) => l.id === 'session-root#t30') || {}).head, true,
@@ -544,8 +547,35 @@ test('a long run on one branch folds too, not only the shared history', async (t
   await view.clickTool(2);
   assert.equal(cards().length, 0, 'the toolbar unfolds the stretches');
   await view.clickTool(2);
-  assert.equal(cards().length, 1, 'and folds them again, still only the ones the threshold allows');
-  assert.ok(view.cardIds().includes('session-root#t1'), 'the short shared run stays drawn throughout');
+  assert.equal(cards().length, 2, 'and folds them again');
+  assert.ok(!view.cardIds().includes('session-root#t1'), 'the shared run stays folded throughout');
+});
+
+// A tag is the reader saying "this turn matters". A fold is the tree saying
+// "these turns decide nothing". The tag wins: a tagged turn is never hidden
+// inside a fold, and it is drawn with the note that was written on it.
+const TAGGED_LINE = Array.from({ length: 30 }, (_, i) => (i + 1 === 12
+  ? { turn: i + 1, text: 'line turn ' + (i + 1), time: i + 1, tag: { note: '**the good one**', time: 99 } }
+  : { turn: i + 1, text: 'line turn ' + (i + 1), time: i + 1 }));
+
+test('a tagged turn is drawn on its own, with its note, and splits the fold', async (t) => {
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' },
+    [{ sessionId: 'session-root', createdAt: 1, current: true, turns: TAGGED_LINE }]);
+
+  const ids = view.cardIds();
+  assert.ok(ids.includes('session-root#t12'), 'the tagged turn is never hidden: ' + ids.join(','));
+  assert.ok(ids.includes('session-root#t30'), 'and the head still stays drawn');
+  assert.ok(!ids.includes('session-root#t20'), 'while the untagged middle is folded');
+
+  const cards = [...view.dom.window.document.querySelectorAll('.mtx-card[data-tag]')];
+  assert.equal(cards.length, 1, 'exactly the tagged turn carries the mark');
+  assert.equal(cards[0].getAttribute('data-id'), 'session-root#t12');
+  assert.equal(cards[0].querySelector('.mtx-card-mark').textContent, 'tag', 'the badge says what it is');
+  assert.equal(cards[0].querySelector('.mtx-card-note strong').textContent, 'the good one',
+    'and the note is drawn as the Markdown it was written in');
+
+  const folds = [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold]')];
+  assert.equal(folds.length, 2, 'the tag splits the run into a fold on each side');
 });
 
 // The swap rule, in the form it was asked for: bringing a version that is
