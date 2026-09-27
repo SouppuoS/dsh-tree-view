@@ -434,6 +434,7 @@ test('a fold opens its outline on hover, and clicking it changes nothing', async
     return active.length === 1 ? Number(active[0].getAttribute('data-turn')) : null;
   };
   const info = () => view.dom.window.document.querySelector('.mtx-outline-info').textContent;
+  assert.ok(!/Turn\s*\d/.test(info()), 'the turn number is not repeated in the block: ' + info());
 
   assert.equal(activeTurn(), 1, 'the first rule is open before the pointer picks one');
   assert.match(info(), /root turn 1/, 'and the block already says what it was: ' + info());
@@ -751,6 +752,27 @@ test('material from a conversation on the canvas is drawn as a dashed arrow', as
     'one dashed arrow, from the sender to the turn it fed');
   assert.equal(view.dom.window.document.querySelectorAll('.mtx-card-ref').length, 0,
     'and no chip, because the sender is already on the canvas');
+});
+
+test('a tagged turn carries the commit every repository was on', async (t) => {
+  const line = Array.from({ length: 6 }, (_, i) => (i + 1 === 2
+    ? { turn: 2, text: 'write it', time: 2, tag: { note: '', time: 9, repos: [
+        { path: '.', head: 'abcdef1234567890', branch: 'main' },
+        { path: 'packages/inner', head: '1234567890abcdef' },
+      ] } }
+    : { turn: i + 1, text: 'turn ' + (i + 1), time: i + 1 }));
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' },
+    [{ sessionId: 'session-root', createdAt: 1, current: true, turns: line }]);
+
+  // A tagged turn is never folded, so the record cannot be read out of the fold
+  // outline — it belongs to the turn's own card, next to its note.
+  const card = view.dom.window.document.querySelector('.mtx-card[data-id="session-root#t2"]');
+  assert.ok(card, 'the tagged turn is drawn on its own');
+  const chips = [...card.querySelectorAll('.mtx-card-commit')];
+  assert.deepEqual(chips.map((el) => el.textContent), ['abcdef1 .', '1234567 packages/inner'],
+    'each repository is a short commit and its path');
+  assert.equal(chips[0].getAttribute('title'), '. @ abcdef1234567890 (main)',
+    'with the full commit and the branch on hand');
 });
 
 test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions.open', async (t) => {

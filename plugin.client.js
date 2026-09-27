@@ -1314,6 +1314,12 @@ const CSS = [
   // they are material that travelled.
   '.mtx-edge-ref{stroke-dasharray:4 4;stroke-width:1.4;opacity:.8}',
   '.mtx-card-refs{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}',
+  // The commit each repository was on when the turn was tagged, one short line
+  // per repository. Monospace because it is a commit, truncated because a path
+  // can be long, and the full pair rides the title.
+  '.mtx-card-commits{display:flex;flex-direction:column;gap:2px;margin-top:4px}',
+  '.mtx-card-commit{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;line-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#888)}',
+  '.mtx-card-commit-more{font-size:10px;color:var(--dsw-alias-label-tertiary,#888)}',
   '.mtx-card-ref{font-size:10px;line-height:14px;padding:1px 5px;border-radius:999px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mtx-accent);background:color-mix(in srgb,var(--mtx-accent) 12%,transparent)}',
   '.mtx-edge[data-path]{stroke:var(--mtx-accent);stroke-width:2}',
   '.mtx-card{position:absolute;left:0;top:0;width:176px;box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:13px;border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 10%,var(--mtx-surface));box-shadow:0 2px 10px var(--mtx-shadow);cursor:pointer;transition:box-shadow 180ms ease,border-color 180ms ease;z-index:1}',
@@ -1385,8 +1391,6 @@ const CSS = [
   '.mtx-outline-item:hover .mtx-outline-bar{width:22px}',
   '.mtx-outline-item[data-active] .mtx-outline-bar{width:24px;background:var(--mtx-accent)}',
   '.mtx-outline-info{flex:none;width:236px;display:flex;flex-direction:column;gap:3px}',
-  '.mtx-outline-info-head{display:flex;align-items:center;gap:7px;font-size:11.5px;line-height:15px;color:var(--dsw-alias-label-secondary,#bbb)}',
-  '.mtx-outline-icon{flex:none;width:13px;text-align:center;font-size:11px}',
   '.mtx-outline-text{font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary,#eee);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}',
   // What a turn produced, as inline code chips: wrapped, capped at four with a
   // count, and truncated by name so one long path cannot push the rest out.
@@ -2764,6 +2768,21 @@ return {
                 n.tag && n.tag.note
                   ? React.createElement('span', { className: 'mtx-card-note' }, markdownLite(n.tag.note))
                   : null,
+                // Where the code stood when this turn was tagged. A tagged turn is
+                // never inside a fold, so its own card is where this is read from.
+                n.tag && n.tag.repos && n.tag.repos.length > 0
+                  ? React.createElement('span', { className: 'mtx-card-commits' },
+                    n.tag.repos.slice(0, 3).map(function (repo) {
+                      return React.createElement('code', {
+                        key: repo.path + '@' + repo.head,
+                        className: 'mtx-card-commit',
+                        title: repo.path + ' @ ' + repo.head + (repo.branch ? ' (' + repo.branch + ')' : ''),
+                      }, String(repo.head).slice(0, 7) + ' ' + repo.path);
+                    }),
+                    n.tag.repos.length > 3
+                      ? React.createElement('span', { className: 'mtx-card-commit-more' }, '+' + (n.tag.repos.length - 3))
+                      : null
+                  ) : null,
                 // Material that came from a conversation which is NOT on this
                 // canvas: there is nothing here to point an arrow at, so the turn
                 // says where it came from instead.
@@ -2926,11 +2945,8 @@ return {
             // One block for whichever turn is open, deliberately NOT lined up with
             // its rule: the rail is an index, not a table.
             React.createElement('div', { className: 'mtx-outline-info' },
-              React.createElement('div', { className: 'mtx-outline-info-head' },
-                React.createElement('span', { className: 'mtx-outline-icon' },
-                  shown.isRoot ? '●' : (shown.operation === 'retry' ? '↻' : (shown.operation === 'edit' ? '✎' : '💬'))),
-                React.createElement('span', { className: 'mtx-outline-turn' }, t('turn', { turn: shown.turn }))
-              ),
+              // No turn label: the rule the pointer is on already says which turn
+              // this is, so repeating the number only takes room from the answer.
               React.createElement('div', { className: 'mtx-outline-text' }, clip(shown.text || '', 180)),
               // What the turn left behind, when it left anything: names only, as
               // inline code, wrapped and capped. The rail is a map of the fold,
@@ -2948,6 +2964,9 @@ return {
                   ? React.createElement('span', { className: 'mtx-outline-more' }, '+' + (shown.files.length - 4))
                   : null
               ) : null
+              // Deliberately no commit row here. A tagged turn is never folded,
+              // and this block only ever describes a turn INSIDE a fold, so the
+              // record would be unreachable — it is stated on the turn's own card.
             )
           );
         })(),
