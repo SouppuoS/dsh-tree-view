@@ -97,7 +97,10 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
           list: {
             subscribe: () => () => {},
             getSnapshot: () => ({
-              byId: Object.fromEntries(versions.map((v) => [v.sessionId, { id: v.sessionId }])),
+              byId: Object.fromEntries(versions.map((v) => [v.sessionId, {
+                id: v.sessionId,
+                ...v.title === undefined ? {} : { displayTitle: v.title },
+              }])),
               // DSH keeps a catalogue of subagents per parent session; the tree
               // reads it when the host payload cannot say (an old host half).
               subagentsByParent: catalogue ?? {},
@@ -403,7 +406,9 @@ test('a long shared history is drawn as one node', async (t) => {
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' });
 
   const card = view.foldCard();
-  assert.ok(card, 'the trunk is folded into one node');
+  // `!== null` rather than the node itself: assert prints the actual value on
+  // failure, and a jsdom node is a graph big enough to run the heap out.
+  assert.equal(card !== null, true, 'the trunk is folded into one node');
   // The node is a circle, so the count is all that fits on it; the phrase that
   // used to be the title is the tooltip now.
   assert.equal(card.querySelector('.mtx-fold-count').textContent, '14',
@@ -583,11 +588,11 @@ test('a coincidental repeat does not drag a fork down the parent line', async (t
 });
 
 test('a long run on one branch folds too, not only the shared history', async (t) => {
-  // 30 turns on the conversation with one small fork at turn 5: the shared
-  // history is turns 1..4, and turns 6..29 are the unbranched run that only this
-  // line continues on. Neither decides anything, so with the default threshold of
-  // two — the smallest run a fold can hide — both fold, and what stays drawn is
-  // the origin, the fork point and the head.
+  // 30 turns on the conversation with one small fork: turns 1..4 are the shared
+  // history, turns 6..29 are the unbranched run only the conversation continues
+  // on, and the fork's own interior turn folds by itself. Three runs, none of
+  // which decides anything; what stays drawn is the origin, the fork point and the
+  // latest turn of every session.
   const longLine = LONG_LINE;
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, longLine);
   const cards = () => [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold]')];
@@ -596,9 +601,8 @@ test('a long run on one branch folds too, not only the shared history', async (t
   const counts = () => cards().map((c) => c.querySelector('.mtx-fold-count').textContent);
   const phrases = () => cards().map((c) => c.getAttribute('title'));
 
-  assert.equal(cards().length, 2, 'both stretches fold: ' + counts().join(' / '));
-  assert.ok(counts().includes('4'), 'the shared history above the fork: ' + counts().join(' / '));
-  assert.ok(counts().includes('24'), 'the run this branch continues on: ' + counts().join(' / '));
+  assert.deepEqual(counts(), ['4', '1', '24'],
+    'the shared history, the fork\'s single interior turn, and the run this line continues on');
   assert.ok(phrases().some((p) => p.indexOf('4 shared turns') === 0),
     'and the tooltip still says what it stands for: ' + phrases().join(' / '));
   assert.ok(phrases().some((p) => p.indexOf('24 turns in a row') === 0),
@@ -606,17 +610,18 @@ test('a long run on one branch folds too, not only the shared history', async (t
 
   const sharedFold = cards().find((c) => c.querySelector('.mtx-fold-count').textContent === '4');
   const runFoldCard = cards().find((c) => c.querySelector('.mtx-fold-count').textContent === '24');
-  assert.ok(sharedFold.hasAttribute('data-fold-shared'), 'the common opening is marked as shared');
-  assert.ok(!runFoldCard.hasAttribute('data-fold-shared'), 'the run one branch carries on with is not');
+  assert.equal(sharedFold.hasAttribute('data-fold-shared'), true, 'the common opening is marked as shared');
+  assert.equal(runFoldCard.hasAttribute('data-fold-shared'), false, 'the run one branch carries on with is not');
 
   const ids = view.cardIds();
-  assert.ok(ids.includes('session-root#t30'), 'the turn you are at stays drawn');
+  assert.equal(ids.includes('session-root#t30'), true, 'the latest turn of the session you are at stays drawn');
+  assert.equal(ids.includes('session-short-fork#t7'), true, 'and so does the latest turn of the fork');
   assert.ok(!ids.includes('session-root#t20'), 'the middle of the long run is hidden');
   assert.ok(ids.includes('session-root#t5'), 'while the turn the branches part at stays');
   assert.ok(!ids.includes('session-root#t1'), 'and so is the middle of the shared history');
 
   const links = view.links();
-  const runFold = cards()[1].getAttribute('data-id');
+  const runFold = runFoldCard.getAttribute('data-id');
   assert.equal((links.find((l) => l.id === runFold) || {}).parent, 'session-root#t5',
     'the run fold hangs off the turn before it');
   assert.equal((links.find((l) => l.id === 'session-root#t30') || {}).head, true,
@@ -720,9 +725,98 @@ test('a version that is still generating a reply is left alone', async (t) => {
     'the version you clicked is still brought out');
 });
 
-test('a family with nothing worth folding draws no fold and no outline', async (t) => {
-  // Two turns and no branches: the only thing a fold could hide is one turn,
-  // which trades a card for a card.
+
+test('every session ends at a named turn that no fold swallows', async (t) => {
+  // Two branches, each a straight run. Without the rule, both runs would fold
+  // away entirely and the canvas would be circles with nothing to tell them
+  // apart: the latest turn of a session is where that branch currently ends, so
+  // it stays, and it carries the name of the session it ends.
+  const line = (n, prefix) => Array.from({ length: n }, (_, i) => ({ turn: i + 1, text: prefix + ' ' + (i + 1), time: i + 1 }));
+  const versions = [
+    { sessionId: 'session-root', createdAt: 1, current: true, title: 'the trunk', turns: line(9, 'root') },
+    { sessionId: 'session-fork', parentSessionId: 'session-root', createdAt: 2, forkTurn: 4, title: 'the fork', turns: line(9, 'fork') },
+  ];
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, versions);
+  const heads = () => [...view.dom.window.document.querySelectorAll('.mtx-card[data-session-head]')];
+  assert.deepEqual(heads().map((h) => h.getAttribute('data-id')), ['session-root#t9', 'session-fork#t9'],
+    'each session keeps the turn it ends at');
+  // The name is the host's title for the session, and it is drawn as a chip.
+  assert.deepEqual(heads().map((h) => h.querySelector('.mtx-card-head').textContent), ['the trunk', 'the fork'],
+    'and each says which session it ends');
+  // The shared opening still folds; what must not fold is either head.
+  assert.equal(view.cardIds().includes('session-root#t5'), false, 'the rest of the run is still folded');
+});
+
+test('a row of folds is a smaller band than a row of cards', async (t) => {
+  // Rows are only as tall as the tallest node on them, so folding does not just
+  // swap cards for circles — it shortens the row they were in. That is the whole
+  // reason a fold is a circle, and it is visible as the step between rows.
+  const flat = [{
+    sessionId: 'session-only', createdAt: 1, current: true,
+    turns: Array.from({ length: 3 }, (_, i) => ({ turn: i + 1, text: 'turn ' + (i + 1), time: i + 1 })),
+  }];
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, flat, undefined, 'session-only');
+  const ys = view.offsets().map((tf) => Number(/translate\([^,]+,\s*([-\d.]+)px\)/.exec(tf)[1]));
+  assert.equal(ys.length, 3, 'the origin, the circle and the latest turn');
+  assert.ok(ys[2] - ys[1] < ys[1] - ys[0],
+    'the step out of the circle is shorter than the step out of a card: ' + ys.join(' / '));
+});
+
+test('a line ends at the middle of a node, where the node covers it', async (t) => {
+  // The junctions used to sit on the rim. That matches exactly in a DOM dump and
+  // still lands a few pixels off the centre on screen, because a transformed
+  // element is snapped to a device pixel and a vector path is not. Ending at the
+  // centre puts the junction under the node, so it cannot be seen off-centre.
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, LONG_LINE);
+  const doc = view.dom.window.document;
+  const centres = [...doc.querySelectorAll('.mtx-card')].map((el) => {
+    const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(el.style.transform);
+    const fold = el.hasAttribute('data-fold');
+    return { x: Number(m[1]) + (fold ? 40 : 176) / 2, y: Number(m[2]) + (fold ? 40 : 58) / 2 };
+  });
+  assert.ok(centres.length > 0, 'the canvas has nodes');
+  const ends = [];
+  for (const el of doc.querySelectorAll('.mtx-edge')) {
+    const d = el.getAttribute('d');
+    const start = /^M([-\d.]+) ([-\d.]+)/.exec(d);
+    const end = /([-\d.]+) ([-\d.]+)$/.exec(d);
+    ends.push([Number(start[1]), Number(start[2])], [Number(end[1]), Number(end[2])]);
+  }
+  assert.ok(ends.length > 0, 'and lines between them');
+  for (const [x, y] of ends) {
+    assert.equal(centres.some((c) => Math.abs(c.x - x) < 0.01 && Math.abs(c.y - y) < 0.01), true,
+      'every line end is a node centre, not a rim: ' + x + ',' + y);
+  }
+});
+test('the fold outline has no surface of its own but the words do', async (t) => {
+  // The rules stand on the canvas the way the conversation view's turn rail
+  // does; only the block that carries text has something to be read against,
+  // and it sits at the middle of the rules rather than at their top.
+  assert.match(bundle, /\.mtx-outline\{[^}]*background:none/, 'the outline draws no panel');
+  assert.match(bundle, /\.mtx-outline\{[^}]*align-items:center/, 'and the words sit at the middle of the rules');
+  assert.match(bundle, /\.mtx-outline-info\{[^}]*background:color-mix/, 'while the block that carries them does');
+  assert.equal(/\.mtx-outline-text\{[^}]*-webkit-line-clamp/.test(bundle), false,
+    'and the text is not clamped to three lines');
+});
+
+test('the outline shows a whole turn, not the first three lines of it', async (t) => {
+  const longText = ('a long turn that has to be shown in full. ').repeat(6).trim();
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, [{
+    sessionId: 'session-only', createdAt: 1, current: true,
+    turns: [
+      { turn: 1, text: longText, time: 1 },
+      { turn: 2, text: 'and the last one', time: 2 },
+    ],
+  }], undefined, 'session-only');
+  await view.hoverCard('session-only#t1#fold');
+  assert.equal(view.dom.window.document.querySelector('.mtx-outline-text').textContent, longText,
+    'the whole turn is there');
+});
+
+test('a single interior turn folds too, now that a fold is a circle', async (t) => {
+  // Two turns and no branches. Hiding one turn used to trade a card for a card,
+  // which is why the floor was two; a fold is a circle now, so it is a win. The
+  // only thing left drawn is the latest turn of the session.
   const flat = [{
     sessionId: 'session-only',
     createdAt: 1,
@@ -733,9 +827,15 @@ test('a family with nothing worth folding draws no fold and no outline', async (
     ],
   }];
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, flat, undefined, 'session-only');
-  assert.equal(view.foldCard(), null, 'nothing is folded');
-  await view.hoverCard('session-only#t1');
-  assert.equal(view.outlineItems().length, 0, 'and a plain card opens no outline at all');
+  assert.deepEqual(view.cardIds(), ['session-only#root', 'session-only#t1#fold', 'session-only#t2'],
+    'the one interior turn folds, and the latest turn of the session stays');
+  assert.equal(view.foldCard().querySelector('.mtx-fold-count').textContent, '1');
+  // A card that is not a fold opens nothing. Checked before the circle is
+  // hovered, because an outline lingers a moment after the pointer leaves one.
+  await view.hoverCard('session-only#t2');
+  assert.equal(view.outlineItems().length, 0, 'a plain card opens no outline at all');
+  await view.hoverCard('session-only#t1#fold');
+  assert.equal(view.outlineItems().length, 1, 'while the circle opens one with the turn it hides');
 });
 
 test('the outline shows the files the open turn produced, as names', async (t) => {

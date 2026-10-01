@@ -159,7 +159,10 @@ let lastViewedSessionId;
 // that started at eight turns, and it now hides every turn that is neither the
 // one being read nor tagged. A stored threshold that was only ever the old
 // default follows the new one; a number the reader chose is kept.
-const PREFS_VERSION = 3;
+// v4 lowers that threshold to a single turn. A fold used to trade one card for
+// another, so hiding one turn bought nothing; a fold is a circle now, so it
+// does, and every run that is not a landmark collapses.
+const PREFS_VERSION = 4;
 const PREFS_KEY = 'dsh-tree-view:prefs';
 const PREFS_DEFAULTS = {
   // Jump back to the branch you last had open when you come back to its family.
@@ -177,13 +180,12 @@ const PREFS_DEFAULTS = {
   // that is not on the canvas leaves on a card. On by default, because a reader
   // who has never touched this expects the tree to say everything it knows.
   showReferences: true,
-  // Straight stretches longer than this fold into a single node (0 = never
-  // fold). That covers the shared history above the first fork and the
-  // unbranched run any one branch continues on. The latest turn of the session
-  // being read and every tagged turn are never hidden inside one, so the default
-  // of two — the smallest run a fold can hide — draws what the reader came for
-  // and folds the rest. A fold node unfolds again, and the toolbar folds by hand.
-  foldSharedAt: 2,
+  // Straight stretches this long fold into a single node (0 = never fold). That
+  // covers the shared history above the first fork and the unbranched run any one
+  // branch continues on. The latest turn of every session and every tagged turn
+  // are never hidden inside one, so the default of one — every run that is not a
+  // landmark — draws what the reader came for and folds the rest.
+  foldSharedAt: 1,
 };
 
 // The preferences that hold a number rather than a switch.
@@ -216,10 +218,11 @@ const prefsStore = {
         const kindOk = !!parsed
           && (PREFS_NUMBERS[k] ? typeof parsed[k] === 'number' : typeof parsed[k] === 'boolean');
         let stored = parsed ? parsed[k] : undefined;
-        // Eight was v2's default, so a stored eight is the value everyone got,
-        // not a decision. Move it with the default so the new folding takes
-        // effect; a deliberately chosen number is left alone.
-        if (k === 'foldSharedAt' && parsed && parsed.v === 2 && stored === 8) stored = PREFS_DEFAULTS.foldSharedAt;
+        // Eight was v2's default and two was v3's, so a stored copy of either is
+        // the value everyone got, not a decision. Move it with the default so the
+        // new folding takes effect; a deliberately chosen number is left alone.
+        const inherited = parsed && ((parsed.v === 2 && stored === 8) || (parsed.v === 3 && stored === 2));
+        if (k === 'foldSharedAt' && inherited) stored = PREFS_DEFAULTS.foldSharedAt;
         const usable = kindOk && (storedVersion >= 2 || k !== 'rememberPath');
         out[k] = usable ? stored : PREFS_DEFAULTS[k];
       }
@@ -250,7 +253,7 @@ const prefsStore = {
 
 // What the fold threshold can be. 0 means "never fold on its own"; the toolbar
 // button folds by hand either way.
-const FOLD_CHOICES = [0, 2, 5, 8, 12, 20];
+const FOLD_CHOICES = [0, 1, 2, 5, 8, 12, 20];
 
 function usePrefs() {
   const [, force] = React.useReducer(function (x) { return x + 1; }, 0);
@@ -777,24 +780,22 @@ const CARD_W = 176;
 const CARD_H = 58;
 // A fold stands for a whole stretch of turns, so it is drawn as a circle instead
 // of a card: the stretch collapses to a point on the line and the canvas keeps
-// the room the turns it hides would have taken. It is centred in the same row a
-// card occupies, and only the node's own box shrinks — the row, the slot grid and
-// the edges that meet it are unchanged.
+// the room the turns it hides would have taken.
 const FOLD_SIZE = 40;
-const FOLD_INSET = (CARD_H - FOLD_SIZE) / 2;
-
-/** The width of a node's drawn box. */
-function nodeWidth(node) { return node && node.fold ? FOLD_SIZE : CARD_W; }
-/** How far below the layout row a node's drawn box starts. */
-function nodeInsetTop(node) { return node && node.fold ? FOLD_INSET : 0; }
-/** How far below the layout row a node's drawn box ends. */
-function nodeInsetBottom(node) { return node && node.fold ? CARD_H - FOLD_INSET : CARD_H; }
-
 // A group frame is a card-sized padding plus a strip for its name.
 const GROUP_PAD = 14;
 const GROUP_HEAD = 20;
 const SLOT_X = 206;
-const SLOT_Y = 132;
+// The vertical air between two rows. A frame reaches GROUP_PAD + GROUP_HEAD above
+// its topmost node and GROUP_PAD below its lowest, so this is the smallest gap
+// that keeps two stacked frames apart. The rows themselves are only as tall as
+// the tallest node in them, which is what makes a row of folds a small band.
+const ROW_GAP = GROUP_PAD + GROUP_HEAD + GROUP_PAD;
+
+/** The width of a node's drawn box. */
+function nodeWidth(node) { return node && node.fold ? FOLD_SIZE : CARD_W; }
+/** The height of the band a node needs: a card's, or the circle's. */
+function nodeRowHeight(node) { return node && node.fold ? FOLD_SIZE : CARD_H; }
 
 /**
  * Project conversation family versions into a turn-level branching tree.
@@ -1055,6 +1056,19 @@ function buildTurnTree(versions, currentSessionId, options) {
     }
   }
 
+  // Every session's latest turn is a landmark: it is where that branch currently
+  // ends and the only turn anyone can add to. The session being read keeps the
+  // extra ring (`head`); the rest are marked the same way, and the card names the
+  // session they end, because once every other run is folded a head is the only
+  // thing on the canvas that says which branch is which.
+  const latestBySession = new Map();
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const seen = latestBySession.get(n.sessionId);
+    if (seen === undefined || (n.turn || 0) >= (seen.turn || 0)) latestBySession.set(n.sessionId, n);
+  }
+  latestBySession.forEach(function (n) { n.sessionHead = true; });
+
   const activePathIds = new Set();
   let latestNode = null;
   for (let i = 0; i < nodes.length; i++) {
@@ -1131,7 +1145,10 @@ function foldLongRuns(nodes, minHidden, keepIncoming) {
     // never swallow it — the same reason the latest turn is excluded. A turn that
     // took material from another conversation is a landmark only while that layer
     // is drawn: with it hidden there is nothing to keep the canvas open for.
-    return kidsOf(n).length === 1 && !n.isRoot && n.head !== true
+    // Every session's latest turn is a landmark (`sessionHead` covers `head`,
+    // which is the session being read), so a fold never swallows the place any
+    // branch ends.
+    return kidsOf(n).length === 1 && !n.isRoot && n.sessionHead !== true
       && n.tag === undefined && !(keepIncoming && n.incoming !== undefined);
   }
 
@@ -1224,11 +1241,13 @@ function layoutTurnTree(nodes) {
   });
   roots.sort(function (a, b) { return (a.time || 0) - (b.time || 0) || String(a.id).localeCompare(String(b.id)); });
   const pos = new Map();
+  const depthOf = new Map();
   let cursor = 0;
   function walk(n, depth) {
+    depthOf.set(n.id, depth);
     const kids = children.get(n.id) || [];
     if (kids.length === 0) {
-      pos.set(n.id, { x: cursor * SLOT_X, y: depth * SLOT_Y });
+      pos.set(n.id, { x: cursor * SLOT_X, y: 0 });
       cursor += 1;
       return;
     }
@@ -1239,9 +1258,34 @@ function layoutTurnTree(nodes) {
       if (p.x < lo) lo = p.x;
       if (p.x > hi) hi = p.x;
     }
-    pos.set(n.id, { x: (lo + hi) / 2, y: depth * SLOT_Y });
+    pos.set(n.id, { x: (lo + hi) / 2, y: 0 });
   }
   for (let i = 0; i < roots.length; i++) walk(roots[i], 0);
+
+  // A row is as tall as the tallest node in it — a row of folds is a small band,
+  // a row with a card on it is a card's band — and a node shorter than its row is
+  // centred in it. So `y` is the top of the node's own box, and the line through
+  // the row meets a circle and a card on the same axis.
+  const rowHeight = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const depth = depthOf.get(n.id) || 0;
+    const height = nodeRowHeight(n);
+    if (rowHeight[depth] === undefined || height > rowHeight[depth]) rowHeight[depth] = height;
+  }
+  const rowTop = [];
+  let top = 0;
+  for (let depth = 0; depth < rowHeight.length; depth++) {
+    rowTop[depth] = top;
+    top += (rowHeight[depth] || 0) + ROW_GAP;
+  }
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const depth = depthOf.get(n.id) || 0;
+    const p = pos.get(n.id);
+    p.y = rowTop[depth] + (rowHeight[depth] - nodeRowHeight(n)) / 2;
+  }
+
   const edges = [];
   children.forEach(function (kids, parentId) {
     for (let i = 0; i < kids.length; i++) {
@@ -1381,6 +1425,10 @@ const CSS = [
   // and its note, so it is told apart from the current turn by what it says.
   '.mtx-card[data-tag]{border-color:var(--mtx-accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--mtx-accent) 55%,transparent),0 6px 22px color-mix(in srgb,var(--mtx-accent) 22%,transparent)}',
   '.mtx-card[data-tag] .mtx-card-icon{background:color-mix(in srgb,var(--mtx-accent) 20%,transparent);color:var(--mtx-accent)}',
+  // The end of a branch, named. It sits on the bottom edge because the top-left
+  // corner is where a tagged turn's badge goes, and a turn can be both.
+  '.mtx-card-head{position:absolute;bottom:-9px;left:8px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:600;line-height:15px;color:var(--dsw-alias-label-secondary,#bbb);background:color-mix(in srgb,var(--mtx-surface) 90%,var(--dsw-alias-label-tertiary,#888));border:1px solid color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 32%,transparent)}',
+  '.mtx-card[data-session-head][data-head] .mtx-card-head{color:var(--mtx-accent);border-color:color-mix(in srgb,var(--mtx-accent) 45%,transparent)}',
   '.mtx-card-mark{position:absolute;top:-8px;left:8px;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:600;line-height:15px;color:var(--mtx-on-accent);background:var(--mtx-accent)}',
   '.mtx-card-note{display:block;margin-top:5px;padding-top:5px;border-top:1px solid color-mix(in srgb,currentColor 20%,transparent);font-size:11px;line-height:15px;color:var(--dsw-alias-label-secondary,var(--dsw-alias-label-tertiary));white-space:pre-wrap;overflow-wrap:anywhere;max-height:62px;overflow:hidden}',
   '.mtx-card-note code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;background:color-mix(in srgb,currentColor 14%,transparent);border-radius:4px;padding:0 3px}',
@@ -1416,15 +1464,21 @@ const CSS = [
   '.mtx-rail-btn:hover{color:var(--dsw-alias-label-primary,#eee);background:var(--dsw-alias-interactive-bg-hover)}',
   '.mtx-rail-btn[data-on]{color:var(--mtx-accent);background:color-mix(in srgb,var(--mtx-accent) 13%,transparent)}',
   '.mtx-rail-btn:focus-visible{outline:2px solid var(--mtx-accent);outline-offset:2px}',
-  '.mtx-outline{position:absolute;z-index:9;display:flex;align-items:flex-start;gap:12px;max-height:300px;padding:8px 10px;border-radius:12px;background:color-mix(in srgb,var(--mtx-surface) 62%,transparent);backdrop-filter:blur(12px);box-shadow:0 10px 28px var(--mtx-shadow);overflow:hidden}',
-  '.mtx-outline-list{flex:none;width:26px;max-height:282px;overscroll-behavior:contain;overflow-y:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
+  // No surface of its own: the rules stand on the canvas the way the
+  // conversation view's turn rail does, and only the block that carries words has
+  // a background to be read against. `align-items:center` is what puts that block
+  // at the middle of the rules rather than at their top.
+  '.mtx-outline{position:absolute;z-index:9;display:flex;align-items:center;gap:10px;padding:0;background:none;box-shadow:none}',
+  '.mtx-outline-list{flex:none;width:26px;max-height:300px;overscroll-behavior:contain;overflow-y:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
   '.mtx-outline-list::-webkit-scrollbar{display:none}',
   '.mtx-outline-item{display:flex;align-items:center;height:9px;padding:0;border:0;background:transparent;cursor:pointer}',
   '.mtx-outline-bar{width:16px;height:2px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);transition:width .15s ease,background .15s ease}',
   '.mtx-outline-item:hover .mtx-outline-bar{width:22px}',
   '.mtx-outline-item[data-active] .mtx-outline-bar{width:24px;background:var(--mtx-accent)}',
-  '.mtx-outline-info{flex:none;width:236px;display:flex;flex-direction:column;gap:3px}',
-  '.mtx-outline-text{font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary,#eee);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}',
+  '.mtx-outline-info{flex:none;width:238px;display:flex;flex-direction:column;gap:4px;padding:9px 11px;border-radius:11px;background:color-mix(in srgb,var(--mtx-surface) 82%,transparent);backdrop-filter:blur(14px);box-shadow:0 10px 26px var(--mtx-shadow)}',
+  // The whole turn, not a three-line taste of it: this block is the answer the
+  // rules are an index to.
+  '.mtx-outline-text{font-size:12px;line-height:17px;color:var(--dsw-alias-label-primary,#eee);white-space:pre-wrap;overflow-wrap:anywhere}',
   // What a turn produced, as inline code chips: wrapped, capped at four with a
   // count, and truncated by name so one long path cannot push the rest out.
   '.mtx-outline-files{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:3px}',
@@ -1635,9 +1689,10 @@ return {
         foldRun: '{count} turns in a row',
         foldOutlineHint: 'Hover to see the turns inside',
         foldSharedLabel: 'Fold long straight stretches',
-        foldSharedHint: 'The turns every branch has in common, and any unbranched run a single branch continues on, are drawn as one node once that many of them are hidden. Click that node — or the toolbar button — to unfold them again. "Never" leaves them drawn.',
+        foldSharedHint: 'The turns every branch has in common, and any unbranched run a single branch continues on, are drawn as one circle once that many of them are hidden. Hover it for the turns inside; one click on a row goes there. The latest turn of every session is never hidden. "Never" leaves everything drawn.',
         foldSharedOff: 'Never',
         foldSharedAt: '{count} or more turns',
+      foldSharedEvery: 'Every run',
         collectOthers: 'Collect every other branch',
         collectRunning: 'Running branches: {count}. Stop them and collect them into the tree?',
         collectStop: 'Confirm',
@@ -1711,9 +1766,10 @@ return {
         foldRun: '连续 {count} 轮',
         foldOutlineHint: '悬停查看里面有哪些轮',
         foldSharedLabel: '折叠过长的连续轮次',
-        foldSharedHint: '「每个分支都一样的开头」以及「一条分支一路直下、中途没有分叉的连续轮次」，隐藏轮数达到这里选的值就折成一个节点；点那个节点（或工具栏按钮）即可展开。「永不」则一直画全。',
+        foldSharedHint: '「每个分支都一样的开头」以及「一条分支一路直下、中途没有分叉的连续轮次」，隐藏轮数达到这里选的值就折成一个小圆圈；悬浮可看里面那几轮，点其中一行即可跳过去。每个会话的最新一轮永远不会被折进去。「永不」则一直画全。',
         foldSharedOff: '永不',
         foldSharedAt: '{count} 轮及以上',
+      foldSharedEvery: '每一段',
         collectOthers: '收起其它分支',
         collectRunning: '有 {count} 个分支正在运行，要结束并归档收起吗？',
         collectStop: '确认',
@@ -2229,8 +2285,10 @@ return {
       // the threshold in Settings decides what is long enough, for the automatic
       // fold and for the toolbar control alike: a button that folded shorter runs
       // than the setting allows was folding three-turn runs out of nowhere.
-      const FOLD_FLOOR = 2;
+      const FOLD_FLOOR = 1;
       const foldAt = prefs.foldSharedAt > 0 ? Math.max(prefs.foldSharedAt, FOLD_FLOOR) : 0;
+      // A fold is a circle now, so hiding a single turn is a win rather than a
+      // swap: the floor is one, and every run that is not a landmark collapses.
       const foldable = React.useMemo(function () {
         return foldAt > 0 ? foldLongRuns(fullNodes, foldAt, prefs.showReferences) : null;
       }, [fullNodes, foldAt, prefs.showReferences]);
@@ -2309,8 +2367,8 @@ return {
             if (!pos) continue;
             left = Math.min(left, pos.x - nodeWidth(n) / 2);
             right = Math.max(right, pos.x + nodeWidth(n) / 2);
-            top = Math.min(top, pos.y + nodeInsetTop(n));
-            bottom = Math.max(bottom, pos.y + nodeInsetBottom(n));
+            top = Math.min(top, pos.y);
+            bottom = Math.max(bottom, pos.y + nodeRowHeight(n));
           }
           if (!Number.isFinite(left)) return;
           boxes.push({
@@ -2768,6 +2826,12 @@ return {
               },
             }, g.label));
           }),
+          // Lines run from the middle of one node to the middle of the next, and
+          // the nodes are painted over them (they come later and carry a z-index),
+          // so what shows is the segment between two boxes. Ending at the rim
+          // instead looks the same in a DOM dump and then lands a few pixels off
+          // the centre on screen, because a transformed element is snapped to a
+          // device pixel while a vector path is not.
           React.createElement('svg', { className: 'mtx-edges' },
             layout.edges.map(function (e) {
               const key = e.from + '>' + e.to;
@@ -2777,7 +2841,7 @@ return {
                 key: key,
                 className: 'mtx-edge',
                 'data-path': e.onPath || undefined,
-                d: a && b ? edgePath(a.x, a.y + nodeInsetBottom(layout.byId.get(e.from)), b.x, b.y + nodeInsetTop(layout.byId.get(e.to))) : undefined,
+                d: a && b ? edgePath(a.x, a.y + nodeRowHeight(layout.byId.get(e.from)) / 2, b.x, b.y + nodeRowHeight(layout.byId.get(e.to)) / 2) : undefined,
                 ref: function (el) { if (el) edgeEls.current.set(key, el); else edgeEls.current.delete(key); },
               });
             }),
@@ -2787,7 +2851,7 @@ return {
               return React.createElement('path', {
                 key: e.key,
                 className: 'mtx-edge mtx-edge-ref',
-                d: a && b ? edgePath(a.x, a.y + nodeInsetBottom(layout.byId.get(e.from)), b.x, b.y + nodeInsetTop(layout.byId.get(e.to))) : undefined,
+                d: a && b ? edgePath(a.x, a.y + nodeRowHeight(layout.byId.get(e.from)) / 2, b.x, b.y + nodeRowHeight(layout.byId.get(e.to)) / 2) : undefined,
               });
             }) : null
           ),
@@ -2799,6 +2863,12 @@ return {
           turnNodes.map(function (n) {
             const s = springs.current.get(n.id) || layout.pos.get(n.id) || { x: 0, y: 0 };
             const summary = titles[n.sessionId];
+            // What this branch is called: the host's title for the session, then
+            // the name the tree itself gave it, then enough of the id to tell two
+            // apart.
+            const sessionLabel = n.sessionHead
+              ? ((summary && (summary.displayTitle || summary.title)) || n.versionLabel || String(n.sessionId).slice(0, 8))
+              : undefined;
             // A named branch reads as a group: the name belongs to the box drawn
             // around the branch, and the node keeps saying what it is ("edited
             // turn 3"), so neither piece of information displaces the other.
@@ -2819,6 +2889,8 @@ return {
               'data-parent': n.parentId || undefined,
               'data-current': n.current || undefined,
               'data-head': n.head || undefined,
+              // The place a branch ends. Never folded, and named below.
+              'data-session-head': n.sessionHead || undefined,
               'data-path': n.onCurrentPath || undefined,
               'data-deleted': n.deleted || undefined,
               'data-archived': n.archived || undefined,
@@ -2845,7 +2917,7 @@ return {
                 ev.stopPropagation();
                 beginMenu(n);
               },
-              style: { transform: 'translate(' + (s.x - nodeWidth(n) / 2) + 'px,' + (s.y + nodeInsetTop(n)) + 'px)' },
+              style: { transform: 'translate(' + (s.x - nodeWidth(n) / 2) + 'px,' + s.y + 'px)' },
               ref: function (el) { if (el) cardEls.current.set(n.id, el); else cardEls.current.delete(n.id); },
             },
               // A fold is the count and nothing else. A card's icon, title,
@@ -2899,6 +2971,10 @@ return {
               // The tag rides on the card's top edge: this conversation belongs to
               // a subagent, not to a version of the reader's message.
               n.subagent ? React.createElement('span', { className: 'mtx-card-tag' }, t('subagentTag')) : null,
+              // The end of a branch, named. Drawn on the opposite corner from the
+              // subagent badge so the two never fight for the same space.
+              sessionLabel === undefined ? null
+                : React.createElement('span', { className: 'mtx-card-head', title: sessionLabel }, sessionLabel),
               n.tag ? React.createElement('span', { className: 'mtx-card-mark' }, t('tagBadge')) : null
             );
           }),
@@ -3045,7 +3121,7 @@ return {
             React.createElement('div', { className: 'mtx-outline-info' },
               // No turn label: the rule the pointer is on already says which turn
               // this is, so repeating the number only takes room from the answer.
-              React.createElement('div', { className: 'mtx-outline-text' }, clip(shown.text || '', 180)),
+              React.createElement('div', { className: 'mtx-outline-text' }, shown.text || ''),
               // What the turn left behind, when it left anything: names only, as
               // inline code, wrapped and capped. The rail is a map of the fold,
               // not a directory listing.
@@ -3293,7 +3369,7 @@ return {
           },
             FOLD_CHOICES.map(function (n) {
               return React.createElement('option', { key: n, value: String(n) },
-                n === 0 ? t('foldSharedOff') : t('foldSharedAt', { count: n }));
+                n === 0 ? t('foldSharedOff') : (n === 1 ? t('foldSharedEvery') : t('foldSharedAt', { count: n })));
             })
           )
         ),
