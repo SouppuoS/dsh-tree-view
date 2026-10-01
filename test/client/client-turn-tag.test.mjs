@@ -109,6 +109,32 @@ test('clicking the button tags the turn and offers the note', async (t) => {
     'saving writes the note through the same action');
 });
 
+test('the note editor is kept inside the window', async (t) => {
+  // The action row sits under a message, so a message near the top of the viewport
+  // pushed an editor that always opened upwards right off the page, and the note
+  // could not be read while it was written.
+  const { dom } = await mountAction(t, {});
+  const button = dom.window.document.querySelector('.mtx-tag-act');
+  await act(async () => button.click());
+  const editor = dom.window.document.querySelector('.mtx-tag-edit');
+  assert.ok(editor, 'the editor is open');
+
+  // jsdom lays nothing out, so the two boxes are stated instead of measured.
+  button.getBoundingClientRect = () => ({ top: 2, bottom: 26, left: 700, right: 740, width: 40, height: 24 });
+  Object.defineProperty(editor, 'offsetWidth', { value: 320, configurable: true });
+  Object.defineProperty(editor, 'offsetHeight', { value: 200, configurable: true });
+  await act(async () => { dom.window.dispatchEvent(new dom.window.Event('resize')); });
+
+  const left = Number(/([-\d.]+)px/.exec(editor.style.left)[1]);
+  const top = Number(/([-\d.]+)px/.exec(editor.style.top)[1]);
+  assert.equal(top, 36, 'with no room above, it opens below the button: ' + editor.style.top);
+  assert.equal(left, 420, 'right-aligned with the button while it fits');
+  assert.ok(left >= 8 && left + 320 <= dom.window.innerWidth,
+    'and inside the window horizontally: ' + editor.style.left);
+  assert.ok(top >= 8 && top + 200 <= dom.window.innerHeight,
+    'and vertically: ' + editor.style.top);
+});
+
 test('clicking a tagged turn takes the tag off again', async (t) => {
   const { dom, posts } = await mountAction(t, { a1: { note: 'x', time: 1 } });
   const button = dom.window.document.querySelector('.mtx-tag-act');

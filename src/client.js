@@ -1469,7 +1469,9 @@ const CSS = [
   // row apart and covered every control after it, and it had no surface of its
   // own because the --mtx-* aliases are scoped to this plugin's own containers.
   // Anchored to the button and lifted above it, it changes nothing about the row.
-  '.mtx-tag-edit{position:absolute;bottom:calc(100% + 10px);right:0;z-index:40;width:min(320px,78vw);display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;border:1px solid var(--mtx-line);background:var(--mtx-surface-raised);box-shadow:0 12px 32px var(--mtx-shadow-strong);text-align:left;white-space:normal}',
+  // Placed against the button and clamped into the window by the render, so it can
+  // never be pushed off the top or the side of the page.
+  '.mtx-tag-edit{position:fixed;z-index:40;max-height:calc(100vh - 16px);overflow:auto;width:min(320px,calc(100vw - 16px));display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;border:1px solid var(--mtx-line);background:var(--mtx-surface-raised);box-shadow:0 12px 32px var(--mtx-shadow-strong);text-align:left;white-space:normal}',
   '.mtx-tag-input{width:100%;box-sizing:border-box;min-height:64px;resize:vertical;border:1px solid var(--mtx-line);border-radius:10px;padding:8px 10px;background:var(--mtx-surface);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;line-height:18px}',
   '.mtx-tag-actions{display:flex;justify-content:flex-end;gap:8px}',
   '.mtx-tag-error{font-size:11px;color:var(--mtx-danger)}',
@@ -3302,6 +3304,43 @@ return {
           .finally(function () { setBusy(false); });
       }
 
+      // The editor opens against the button, but clamped into the window: the action
+      // row sits under a message, and a message near the top of the viewport pushed
+      // an editor that always opened upwards right off it, so the note could not be
+      // read while it was written.
+      const tagButtonRef = React.useRef(null);
+      const tagEditorRef = React.useRef(null);
+      const editorPosState = React.useState(null);
+      const editorPos = editorPosState[0];
+      const setEditorPos = editorPosState[1];
+      React.useLayoutEffect(function () {
+        const view = realGlobal();
+        if (draft === null || !view) return undefined;
+        const place = function () {
+          const button = tagButtonRef.current;
+          const editor = tagEditorRef.current;
+          if (!button || !editor) return;
+          const rect = button.getBoundingClientRect();
+          const width = editor.offsetWidth;
+          const height = editor.offsetHeight;
+          const margin = 8;
+          const maxLeft = Math.max(margin, (view.innerWidth || 0) - width - margin);
+          const maxTop = Math.max(margin, (view.innerHeight || 0) - height - margin);
+          const left = Math.max(margin, Math.min(rect.right - width, maxLeft));
+          // Above the button, or below it when the top of the window is in the way.
+          let top = rect.top - height - 10;
+          if (top < margin) top = rect.bottom + 10;
+          setEditorPos({ left: left, top: Math.max(margin, Math.min(top, maxTop)) });
+        };
+        place();
+        view.addEventListener('resize', place);
+        view.addEventListener('scroll', place, true);
+        return function () {
+          view.removeEventListener('resize', place);
+          view.removeEventListener('scroll', place, true);
+        };
+      }, [draft === null]);
+
       // Clicking anywhere outside the popover closes it, the way the tree's own
       // menu closes: the action row belongs to the chat, and a leaked editor
       // would sit there until the view was replaced.
@@ -3329,6 +3368,7 @@ return {
           'aria-expanded': draft === null ? undefined : 'true',
           title: tag ? t('tagRemove') : t('tagAdd'),
           disabled: busy || undefined,
+          ref: tagButtonRef,
           onClick: function () {
             // Open while closed, close while open, and only take a tag off from
             // the closed state: one control, one gesture, and no way to lose a
@@ -3343,7 +3383,9 @@ return {
         }, TagIcon()),
         draft === null ? null : React.createElement('span', {
           className: 'mtx-tag-edit',
+          ref: tagEditorRef,
           onPointerDown: function (event) { event.stopPropagation(); },
+          style: editorPos === null ? { visibility: 'hidden' } : { left: editorPos.left + 'px', top: editorPos.top + 'px' },
         },
           React.createElement('textarea', {
             className: 'mtx-tag-input',
