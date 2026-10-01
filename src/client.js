@@ -775,6 +775,21 @@ function timeLabel(ms) {
 
 const CARD_W = 176;
 const CARD_H = 58;
+// A fold stands for a whole stretch of turns, so it is drawn as a circle instead
+// of a card: the stretch collapses to a point on the line and the canvas keeps
+// the room the turns it hides would have taken. It is centred in the same row a
+// card occupies, and only the node's own box shrinks — the row, the slot grid and
+// the edges that meet it are unchanged.
+const FOLD_SIZE = 40;
+const FOLD_INSET = (CARD_H - FOLD_SIZE) / 2;
+
+/** The width of a node's drawn box. */
+function nodeWidth(node) { return node && node.fold ? FOLD_SIZE : CARD_W; }
+/** How far below the layout row a node's drawn box starts. */
+function nodeInsetTop(node) { return node && node.fold ? FOLD_INSET : 0; }
+/** How far below the layout row a node's drawn box ends. */
+function nodeInsetBottom(node) { return node && node.fold ? CARD_H - FOLD_INSET : CARD_H; }
+
 // A group frame is a card-sized padding plus a strip for its name.
 const GROUP_PAD = 14;
 const GROUP_HEAD = 20;
@@ -1344,17 +1359,18 @@ const CSS = [
   '.mtx-card[data-dragging]{cursor:grabbing;box-shadow:0 14px 34px var(--mtx-shadow-strong);z-index:3}',
   '.mtx-card[data-deleted]{opacity:.55;border-style:dashed;cursor:default}',
   '.mtx-card[data-archived]{opacity:.72}',
-  // A folded stretch is not a turn: it is a stack of them. Three sheets offset
-  // down-right, the top one labelled, one line of text, and a chevron saying that
-  // it opens — chosen from the candidates for reading as a stack even when the
-  // canvas is zoomed out. Taller than a bar on purpose, so it holds its own next
-  // to a turn card. Everything takes its colour from `currentColor`, so an accent
-  // fold on the line you are reading stays accent and the rest stay neutral.
-  '.mtx-card[data-fold]{width:176px;padding:15px 14px;border-radius:11px;border:1px solid color-mix(in srgb,currentColor 48%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 15%,var(--mtx-surface));color:var(--dsw-alias-label-secondary,#bbb);box-shadow:7px 7px 0 -1px var(--mtx-surface),7px 7px 0 0 color-mix(in srgb,currentColor 55%,transparent),14px 14px 0 -2px var(--mtx-surface),14px 14px 0 -1px color-mix(in srgb,currentColor 32%,transparent);align-items:center;gap:8px}',
-  '.mtx-card[data-fold][data-current]{color:var(--mtx-accent)}',
-  '.mtx-card[data-fold] .mtx-card-icon{width:auto;height:auto;background:transparent;color:inherit;font-size:13px;letter-spacing:.08em}',
-  '.mtx-card[data-fold] .mtx-card-title{font-size:12.5px;line-height:18px;color:inherit;font-weight:600}',
-  '.mtx-fold-cue{margin-left:auto;flex:none;font-size:12px;line-height:1;color:inherit;opacity:.7}',
+  // A folded stretch is not a turn: it is a whole run of them, and it is drawn as
+  // a circle rather than a card so the canvas keeps the room the hidden turns
+  // would have taken. The count inside says how much is hidden; the outline the
+  // pointer opens says which turns they are. Everything takes its colour from
+  // `currentColor`, so a fold on the line you are reading stays accent and the
+  // rest stay neutral.
+  '.mtx-card[data-fold]{width:40px;height:40px;padding:0;border-radius:50%;border:1px solid color-mix(in srgb,currentColor 52%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 15%,var(--mtx-surface));color:var(--dsw-alias-label-secondary,#bbb);box-shadow:0 3px 12px var(--mtx-shadow);align-items:center;justify-content:center}',
+  // A run every branch shares is the common opening; a run one branch carries on
+  // with is not. The ring says which, without another word on the canvas.
+  '.mtx-card[data-fold][data-fold-shared]{border-style:dashed}',
+  '.mtx-card[data-fold][data-current]{color:var(--mtx-accent);border-color:color-mix(in srgb,var(--mtx-accent) 62%,transparent)}',
+  '.mtx-fold-count{font-size:13px;font-weight:600;line-height:1;color:inherit;font-variant-numeric:tabular-nums}',
   '.mtx-card[data-labeled] .mtx-card-title{color:var(--mtx-accent)}',
   // A subagent conversation is not a version of your message, so the card says so
   // where it can always be seen: a small accent tag on the card's top edge. It
@@ -2291,10 +2307,10 @@ return {
           for (const n of nodes) {
             const pos = layout.pos.get(n.id);
             if (!pos) continue;
-            left = Math.min(left, pos.x - CARD_W / 2);
-            right = Math.max(right, pos.x + CARD_W / 2);
-            top = Math.min(top, pos.y);
-            bottom = Math.max(bottom, pos.y + CARD_H);
+            left = Math.min(left, pos.x - nodeWidth(n) / 2);
+            right = Math.max(right, pos.x + nodeWidth(n) / 2);
+            top = Math.min(top, pos.y + nodeInsetTop(n));
+            bottom = Math.max(bottom, pos.y + nodeInsetBottom(n));
           }
           if (!Number.isFinite(left)) return;
           boxes.push({
@@ -2712,10 +2728,16 @@ return {
         if (d.kind === 'node' && !d.moved) openVersion(d.id);
       }
 
+      /**
+       * What a fold is, in words. It only has room for the count on the canvas,
+       * so this is what the tooltip says, and the outline below it says which
+       * turns the count is standing for.
+       */
+      function foldPhrase(n) {
+        return n.foldShared ? t('foldTurns', { count: n.foldCount }) : t('foldRun', { count: n.foldCount });
+      }
+
       function cardTitle(n) {
-        if (n.fold) return n.foldShared
-          ? t('foldTurns', { count: n.foldCount })
-          : t('foldRun', { count: n.foldCount });
         if (n.deleted) return t('deletedVersion');
         if (n.copy) return t('copyBranch');
         if (n.isRoot) return t('original');
@@ -2755,7 +2777,7 @@ return {
                 key: key,
                 className: 'mtx-edge',
                 'data-path': e.onPath || undefined,
-                d: a && b ? edgePath(a.x, a.y + 58, b.x, b.y) : undefined,
+                d: a && b ? edgePath(a.x, a.y + nodeInsetBottom(layout.byId.get(e.from)), b.x, b.y + nodeInsetTop(layout.byId.get(e.to))) : undefined,
                 ref: function (el) { if (el) edgeEls.current.set(key, el); else edgeEls.current.delete(key); },
               });
             }),
@@ -2765,7 +2787,7 @@ return {
               return React.createElement('path', {
                 key: e.key,
                 className: 'mtx-edge mtx-edge-ref',
-                d: a && b ? edgePath(a.x, a.y + 58, b.x, b.y) : undefined,
+                d: a && b ? edgePath(a.x, a.y + nodeInsetBottom(layout.byId.get(e.from)), b.x, b.y + nodeInsetTop(layout.byId.get(e.to))) : undefined,
               });
             }) : null
           ),
@@ -2802,13 +2824,14 @@ return {
               'data-archived': n.archived || undefined,
               'data-running': n.running || undefined,
               'data-fold': n.fold || undefined,
+              'data-fold-shared': n.foldShared || undefined,
               // A subagent conversation shares this family (same cwd, parent
               // session) but is not a version of the reader's message. The card
               // says so in the open, and says it in the subtitle too, so a chain
               // of its turns is recognisable at a glance.
               'data-subagent': n.subagent || undefined,
               'data-tag': n.tag ? '' : undefined,
-              title: n.deleted ? undefined : (n.fold ? t('foldOutlineHint') : t('menuHint')),
+              title: n.deleted ? undefined : (n.fold ? foldPhrase(n) + ' · ' + t('foldOutlineHint') : t('menuHint')),
               // Only a fold has an outline; every other card behaves as before.
               onMouseEnter: n.fold ? function (ev) {
                 const el = graphRef.current;
@@ -2822,12 +2845,17 @@ return {
                 ev.stopPropagation();
                 beginMenu(n);
               },
-              style: { transform: 'translate(' + (s.x - CARD_W / 2) + 'px,' + s.y + 'px)' },
+              style: { transform: 'translate(' + (s.x - nodeWidth(n) / 2) + 'px,' + (s.y + nodeInsetTop(n)) + 'px)' },
               ref: function (el) { if (el) cardEls.current.set(n.id, el); else cardEls.current.delete(n.id); },
             },
-              React.createElement('span', { className: 'mtx-card-icon' },
-                n.fold ? '⋯' : n.deleted ? '∅' : n.isRoot ? '●' : (n.operation === 'retry' ? '↻' : (n.operation === 'edit' ? '✎' : '💬'))),
-              React.createElement('span', { className: 'mtx-card-main' },
+              // A fold is the count and nothing else. A card's icon, title,
+              // subtitle and rows all describe a turn, and a fold is not one;
+              // the phrase that used to sit here is in the tooltip instead.
+              n.fold
+                ? React.createElement('span', { className: 'mtx-fold-count' }, String(n.foldCount))
+                : React.createElement('span', { className: 'mtx-card-icon' },
+                  n.deleted ? '∅' : n.isRoot ? '●' : (n.operation === 'retry' ? '↻' : (n.operation === 'edit' ? '✎' : '💬'))),
+              n.fold ? null : React.createElement('span', { className: 'mtx-card-main' },
                 React.createElement('span', { className: 'mtx-card-title' }, cardTitle(n)),
                 // A folded stretch is one line by design: the turns it hides are
                 // not there to be described, and the pill says "click me" by
@@ -2868,7 +2896,6 @@ return {
                     })
                 ) : null
               ),
-              n.fold ? React.createElement('span', { className: 'mtx-fold-cue' }, '⌄') : null,
               // The tag rides on the card's top edge: this conversation belongs to
               // a subagent, not to a version of the reader's message.
               n.subagent ? React.createElement('span', { className: 'mtx-card-tag' }, t('subagentTag')) : null,

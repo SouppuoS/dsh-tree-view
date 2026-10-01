@@ -403,9 +403,14 @@ test('a long shared history is drawn as one node', async (t) => {
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' });
 
   const card = view.foldCard();
-  assert.ok(card, 'the trunk is folded into one card');
-  assert.ok(card.textContent.includes('14 shared turns'),
-    'the card says how much it hides: ' + card.textContent);
+  assert.ok(card, 'the trunk is folded into one node');
+  // The node is a circle, so the count is all that fits on it; the phrase that
+  // used to be the title is the tooltip now.
+  assert.equal(card.querySelector('.mtx-fold-count').textContent, '14',
+    'the node says how much it hides: ' + card.textContent);
+  assert.ok(card.getAttribute('title').startsWith('14 shared turns'),
+    'and says what it stands for on hover: ' + card.getAttribute('title'));
+  assert.ok(!card.querySelector('.mtx-card-title'), 'a circle has no room for a card title');
   assert.ok(!view.cardIds().includes('session-root#t5'), 'the turns it hides are off the canvas');
   assert.ok(view.cardIds().includes('session-root#root'), 'the conversation itself stays');
   assert.ok(view.cardIds().includes('session-root#t15'), 'and so does the turn where the branches part');
@@ -586,11 +591,23 @@ test('a long run on one branch folds too, not only the shared history', async (t
   const longLine = LONG_LINE;
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, longLine);
   const cards = () => [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold]')];
-  const titles = () => cards().map((c) => c.querySelector('.mtx-card-title').textContent);
+  // A fold is a circle carrying the count and nothing else; the phrase that used
+  // to be its title is the tooltip now, because a circle has no room for words.
+  const counts = () => cards().map((c) => c.querySelector('.mtx-fold-count').textContent);
+  const phrases = () => cards().map((c) => c.getAttribute('title'));
 
-  assert.equal(cards().length, 2, 'both stretches fold: ' + titles().join(' / '));
-  assert.ok(titles().includes('4 shared turns'), 'the shared history above the fork: ' + titles().join(' / '));
-  assert.ok(titles().includes('24 turns in a row'), 'the run this branch continues on: ' + titles().join(' / '));
+  assert.equal(cards().length, 2, 'both stretches fold: ' + counts().join(' / '));
+  assert.ok(counts().includes('4'), 'the shared history above the fork: ' + counts().join(' / '));
+  assert.ok(counts().includes('24'), 'the run this branch continues on: ' + counts().join(' / '));
+  assert.ok(phrases().some((p) => p.indexOf('4 shared turns') === 0),
+    'and the tooltip still says what it stands for: ' + phrases().join(' / '));
+  assert.ok(phrases().some((p) => p.indexOf('24 turns in a row') === 0),
+    'both ways round: ' + phrases().join(' / '));
+
+  const sharedFold = cards().find((c) => c.querySelector('.mtx-fold-count').textContent === '4');
+  const runFoldCard = cards().find((c) => c.querySelector('.mtx-fold-count').textContent === '24');
+  assert.ok(sharedFold.hasAttribute('data-fold-shared'), 'the common opening is marked as shared');
+  assert.ok(!runFoldCard.hasAttribute('data-fold-shared'), 'the run one branch carries on with is not');
 
   const ids = view.cardIds();
   assert.ok(ids.includes('session-root#t30'), 'the turn you are at stays drawn');
@@ -857,8 +874,8 @@ test('turning the layer off folds the turns it was holding open', async (t) => {
   await view.clickRail();
   assert.ok(!view.cardIds().includes('session-root#t2'), 'and folds away once the layer is off');
   assert.deepEqual(
-    [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold] .mtx-card-title')].map((el) => el.textContent),
-    ['5 shared turns'], 'one fold now covers the whole stretch');
+    [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold] .mtx-fold-count')].map((el) => el.textContent),
+    ['5'], 'one fold now covers the whole stretch');
 });
 
 test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions.open', async (t) => {
