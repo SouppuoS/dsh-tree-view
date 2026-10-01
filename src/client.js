@@ -780,8 +780,16 @@ const CARD_W = 176;
 const CARD_H = 58;
 // A fold stands for a whole stretch of turns, so it is drawn as a circle instead
 // of a card: the stretch collapses to a point on the line and the canvas keeps
-// the room the turns it hides would have taken.
-const FOLD_SIZE = 40;
+// the room the turns it hides would have taken. It is small and carries no text —
+// how many turns it hides, and which ones they are, is the tooltip's and the
+// outline's job.
+const FOLD_SIZE = 26;
+// Every node is anchored by the same card-width box and a circle is inset into it
+// by this much. One anchoring rule for every node is what keeps a circle's centre
+// on exactly the line the cards are centred on; a per-node width in the transform
+// is one half-width away from being off by that much, and the browser's own
+// margin arithmetic is not somewhere a rounding difference can creep in.
+const FOLD_INSET = (CARD_W - FOLD_SIZE) / 2;
 // A group frame is a card-sized padding plus a strip for its name.
 const GROUP_PAD = 14;
 const GROUP_HEAD = 20;
@@ -792,8 +800,6 @@ const SLOT_X = 206;
 // the tallest node in them, which is what makes a row of folds a small band.
 const ROW_GAP = GROUP_PAD + GROUP_HEAD + GROUP_PAD;
 
-/** The width of a node's drawn box. */
-function nodeWidth(node) { return node && node.fold ? FOLD_SIZE : CARD_W; }
 /** The height of the band a node needs: a card's, or the circle's. */
 function nodeRowHeight(node) { return node && node.fold ? FOLD_SIZE : CARD_H; }
 
@@ -1295,6 +1301,15 @@ function layoutTurnTree(nodes) {
   return { pos: pos, edges: edges, byId: byId, nodes: nodes };
 }
 
+// The fold outline's rules. A long fold is read as a block of columns rather than
+// scrolled, and the rail's height is fixed from the row count so that changing
+// which row is open cannot move the bars under the pointer — which is what made
+// them flip out from under the cursor as soon as the text block resized.
+const RAIL_ITEM_H = 11; // a 9px row plus the 2px gap between rows
+const RAIL_MAX_H = 300;
+const RAIL_COL_W = 26;
+const RAIL_COL_GAP = 8;
+
 function edgePath(x1, y1, x2, y2) {
   const dy = Math.max(26, (y2 - y1) * 0.5);
   return 'M' + x1 + ' ' + y1 + ' C' + x1 + ' ' + (y1 + dy) + ', ' + x2 + ' ' + (y2 - dy) + ', ' + x2 + ' ' + y2;
@@ -1409,12 +1424,11 @@ const CSS = [
   // pointer opens says which turns they are. Everything takes its colour from
   // `currentColor`, so a fold on the line you are reading stays accent and the
   // rest stay neutral.
-  '.mtx-card[data-fold]{width:40px;height:40px;padding:0;border-radius:50%;border:1px solid color-mix(in srgb,currentColor 52%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 15%,var(--mtx-surface));color:var(--dsw-alias-label-secondary,#bbb);box-shadow:0 3px 12px var(--mtx-shadow);align-items:center;justify-content:center}',
+  '.mtx-card[data-fold]{width:' + FOLD_SIZE + 'px;height:' + FOLD_SIZE + 'px;margin-left:' + FOLD_INSET + 'px;padding:0;border-radius:50%;border:1px solid color-mix(in srgb,currentColor 52%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 15%,var(--mtx-surface));color:var(--dsw-alias-label-secondary,#bbb);box-shadow:0 2px 8px var(--mtx-shadow)}',
   // A run every branch shares is the common opening; a run one branch carries on
   // with is not. The ring says which, without another word on the canvas.
   '.mtx-card[data-fold][data-fold-shared]{border-style:dashed}',
   '.mtx-card[data-fold][data-current]{color:var(--mtx-accent);border-color:color-mix(in srgb,var(--mtx-accent) 62%,transparent)}',
-  '.mtx-fold-count{font-size:13px;font-weight:600;line-height:1;color:inherit;font-variant-numeric:tabular-nums}',
   '.mtx-card[data-labeled] .mtx-card-title{color:var(--mtx-accent)}',
   // A subagent conversation is not a version of your message, so the card says so
   // where it can always be seen: a small accent tag on the card's top edge. It
@@ -1469,9 +1483,10 @@ const CSS = [
   // a background to be read against. `align-items:center` is what puts that block
   // at the middle of the rules rather than at their top.
   '.mtx-outline{position:absolute;z-index:9;display:flex;align-items:center;gap:10px;padding:0;background:none;box-shadow:none}',
-  '.mtx-outline-list{flex:none;width:26px;max-height:300px;overscroll-behavior:contain;overflow-y:auto;display:flex;flex-direction:column;gap:2px;scrollbar-width:none}',
-  '.mtx-outline-list::-webkit-scrollbar{display:none}',
-  '.mtx-outline-item{display:flex;align-items:center;height:9px;padding:0;border:0;background:transparent;cursor:pointer}',
+  // Columns, not a scroller: a fold with forty turns in it is read as a block of
+  // rules, and the width and height are set from the row count in the render.
+  '.mtx-outline-list{flex:none;display:flex;flex-flow:column wrap;align-content:flex-start;gap:2px 8px;scrollbar-width:none}',
+  '.mtx-outline-item{display:flex;align-items:center;width:26px;height:9px;padding:0;border:0;background:transparent;cursor:pointer}',
   '.mtx-outline-bar{width:16px;height:2px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);transition:width .15s ease,background .15s ease}',
   '.mtx-outline-item:hover .mtx-outline-bar{width:22px}',
   '.mtx-outline-item[data-active] .mtx-outline-bar{width:24px;background:var(--mtx-accent)}',
@@ -2365,8 +2380,8 @@ return {
           for (const n of nodes) {
             const pos = layout.pos.get(n.id);
             if (!pos) continue;
-            left = Math.min(left, pos.x - nodeWidth(n) / 2);
-            right = Math.max(right, pos.x + nodeWidth(n) / 2);
+            left = Math.min(left, pos.x - CARD_W / 2);
+            right = Math.max(right, pos.x + CARD_W / 2);
             top = Math.min(top, pos.y);
             bottom = Math.max(bottom, pos.y + nodeRowHeight(n));
           }
@@ -2917,15 +2932,15 @@ return {
                 ev.stopPropagation();
                 beginMenu(n);
               },
-              style: { transform: 'translate(' + (s.x - nodeWidth(n) / 2) + 'px,' + s.y + 'px)' },
+              // One anchoring rule for every node; a circle insets itself with
+              // `margin-left` in CSS, from the same two numbers.
+              style: { transform: 'translate(' + (s.x - CARD_W / 2) + 'px,' + s.y + 'px)' },
               ref: function (el) { if (el) cardEls.current.set(n.id, el); else cardEls.current.delete(n.id); },
             },
-              // A fold is the count and nothing else. A card's icon, title,
-              // subtitle and rows all describe a turn, and a fold is not one;
-              // the phrase that used to sit here is in the tooltip instead.
-              n.fold
-                ? React.createElement('span', { className: 'mtx-fold-count' }, String(n.foldCount))
-                : React.createElement('span', { className: 'mtx-card-icon' },
+              // A fold is the circle and nothing else: no icon, no title, no
+              // count on it. A card's rows all describe a turn, and a fold is not
+              // one; what it stands for is in the tooltip and the outline.
+              n.fold ? null : React.createElement('span', { className: 'mtx-card-icon' },
                   n.deleted ? '∅' : n.isRoot ? '●' : (n.operation === 'retry' ? '↻' : (n.operation === 'edit' ? '✎' : '💬'))),
               n.fold ? null : React.createElement('span', { className: 'mtx-card-main' },
                 React.createElement('span', { className: 'mtx-card-title' }, cardTitle(n)),
@@ -3079,10 +3094,18 @@ return {
           const el = graphRef.current;
           const boxW = el ? el.clientWidth : 640;
           const boxH = el ? el.clientHeight : 420;
-          const openW = 276;
+          // The rail: as many rules per column as fit, and as many columns as the
+          // rules need. Its height is fixed here rather than derived from the text
+          // block, so opening a different row cannot move the bars.
+          const bars = hovered.foldNodes.length;
+          const perColumn = Math.max(1, Math.floor(RAIL_MAX_H / RAIL_ITEM_H));
+          const columns = Math.max(1, Math.ceil(bars / perColumn));
+          const railH = Math.min(bars, perColumn) * RAIL_ITEM_H;
+          const railW = columns * RAIL_COL_W + (columns - 1) * RAIL_COL_GAP;
+          const openW = railW + 10 + 238;
           // Beside the pointer, but never off the panel.
           const left = Math.max(8, Math.min(foldHover.x + 16, Math.max(8, boxW - openW - 12)));
-          const top = Math.max(8, Math.min(foldHover.y - 22, Math.max(8, boxH - 220)));
+          const top = Math.max(8, Math.min(foldHover.y - 22, Math.max(8, boxH - Math.min(railH, 200))));
           // The first turn is open before the pointer picks one, so the panel
           // always says something instead of waiting to be interrogated.
           const picked = outlineRow === null ? undefined
@@ -3091,14 +3114,14 @@ return {
           return React.createElement('div', {
             className: 'mtx-outline',
             key: 'fold-outline',
-            style: { left: left + 'px', top: top + 'px' },
+            style: { left: left + 'px', top: top + 'px', height: railH + 'px' },
             onMouseEnter: foldOutlineHold,
             onMouseLeave: function () { setOutlineRow(null); foldOutlineLeave(); },
             onPointerDown: function (ev) { ev.stopPropagation(); },
           },
             // The rules: one per hidden turn and nothing else. Only the open one
             // stands out.
-            React.createElement('div', { className: 'mtx-outline-list' },
+            React.createElement('div', { className: 'mtx-outline-list', style: { width: railW + 'px', height: railH + 'px' } },
               hovered.foldNodes.map(function (hidden) {
                 return React.createElement('button', {
                   key: hidden.id,

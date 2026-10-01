@@ -411,8 +411,7 @@ test('a long shared history is drawn as one node', async (t) => {
   assert.equal(card !== null, true, 'the trunk is folded into one node');
   // The node is a circle, so the count is all that fits on it; the phrase that
   // used to be the title is the tooltip now.
-  assert.equal(card.querySelector('.mtx-fold-count').textContent, '14',
-    'the node says how much it hides: ' + card.textContent);
+  assert.equal(card.textContent, '', 'a circle carries no text on it at all');
   assert.ok(card.getAttribute('title').startsWith('14 shared turns'),
     'and says what it stands for on hover: ' + card.getAttribute('title'));
   assert.ok(!card.querySelector('.mtx-card-title'), 'a circle has no room for a card title');
@@ -598,18 +597,19 @@ test('a long run on one branch folds too, not only the shared history', async (t
   const cards = () => [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold]')];
   // A fold is a circle carrying the count and nothing else; the phrase that used
   // to be its title is the tooltip now, because a circle has no room for words.
-  const counts = () => cards().map((c) => c.querySelector('.mtx-fold-count').textContent);
   const phrases = () => cards().map((c) => c.getAttribute('title'));
 
-  assert.deepEqual(counts(), ['4', '1', '24'],
-    'the shared history, the fork\'s single interior turn, and the run this line continues on');
+  assert.equal(cards().length, 3, 'three runs fold: ' + phrases().join(' / '));
+  assert.ok(phrases().some((p) => p.indexOf('4 shared turns') === 0), 'the shared history');
+  assert.ok(phrases().some((p) => p.indexOf('1 turns in a row') === 0),
+    'the fork\'s single interior turn, which folds now that a fold is a circle');
   assert.ok(phrases().some((p) => p.indexOf('4 shared turns') === 0),
     'and the tooltip still says what it stands for: ' + phrases().join(' / '));
   assert.ok(phrases().some((p) => p.indexOf('24 turns in a row') === 0),
     'both ways round: ' + phrases().join(' / '));
 
-  const sharedFold = cards().find((c) => c.querySelector('.mtx-fold-count').textContent === '4');
-  const runFoldCard = cards().find((c) => c.querySelector('.mtx-fold-count').textContent === '24');
+  const sharedFold = cards().find((c) => c.getAttribute('title').indexOf('4 shared turns') === 0);
+  const runFoldCard = cards().find((c) => c.getAttribute('title').indexOf('24 turns in a row') === 0);
   assert.equal(sharedFold.hasAttribute('data-fold-shared'), true, 'the common opening is marked as shared');
   assert.equal(runFoldCard.hasAttribute('data-fold-shared'), false, 'the run one branch carries on with is not');
 
@@ -771,8 +771,10 @@ test('a line ends at the middle of a node, where the node covers it', async (t) 
   const doc = view.dom.window.document;
   const centres = [...doc.querySelectorAll('.mtx-card')].map((el) => {
     const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(el.style.transform);
+    // Every node is anchored by the same card-width box — a circle insets itself
+    // with `margin-left` — so the centre is the same arithmetic for all of them.
     const fold = el.hasAttribute('data-fold');
-    return { x: Number(m[1]) + (fold ? 40 : 176) / 2, y: Number(m[2]) + (fold ? 40 : 58) / 2 };
+    return { x: Number(m[1]) + 88, y: Number(m[2]) + (fold ? 13 : 29) };
   });
   assert.ok(centres.length > 0, 'the canvas has nodes');
   const ends = [];
@@ -787,6 +789,25 @@ test('a line ends at the middle of a node, where the node covers it', async (t) 
     assert.equal(centres.some((c) => Math.abs(c.x - x) < 0.01 && Math.abs(c.y - y) < 0.01), true,
       'every line end is a node centre, not a rim: ' + x + ',' + y);
   }
+});
+test('a long fold reads as columns of rules, and the rules never move', async (t) => {
+  // A fold with forty turns in it is a block of rules, not a scroller. The rail's
+  // height comes from the row count rather than from the text block beside it, so
+  // opening a longer turn cannot resize the rail and slide the bars out from under
+  // the pointer — which is what made them flip as soon as the pointer moved.
+  const turns = Array.from({ length: 31 }, (_, i) => ({ turn: i + 1, text: 'turn ' + (i + 1), time: i + 1 }));
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' },
+    [{ sessionId: 'session-only', createdAt: 1, current: true, turns }], undefined, 'session-only');
+  const list = view.dom.window.document.querySelector('.mtx-outline-list');
+  assert.equal(list, null, 'nothing is open before the circle is hovered');
+  await view.hoverCard('session-only#t1#fold');
+  const rail = view.dom.window.document.querySelector('.mtx-outline-list');
+  assert.equal(view.outlineItems().length, 30, 'every hidden turn gets a rule');
+  // Twenty-seven rows fit in 300px at eleven pixels a row; the rest wrap.
+  assert.equal(rail.style.height, '297px', 'the rail is as tall as a full column of rules');
+  assert.equal(rail.style.width, '60px', 'and as wide as the columns it wrapped into');
+  await view.hoverOutlineRow(2);
+  assert.equal(rail.style.height, '297px', 'opening another rule does not resize the rail');
 });
 test('the fold outline has no surface of its own but the words do', async (t) => {
   // The rules stand on the canvas the way the conversation view's turn rail
@@ -829,7 +850,8 @@ test('a single interior turn folds too, now that a fold is a circle', async (t) 
   const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, flat, undefined, 'session-only');
   assert.deepEqual(view.cardIds(), ['session-only#root', 'session-only#t1#fold', 'session-only#t2'],
     'the one interior turn folds, and the latest turn of the session stays');
-  assert.equal(view.foldCard().querySelector('.mtx-fold-count').textContent, '1');
+  assert.equal(view.foldCard().getAttribute('title').indexOf('1 shared turns'), 0,
+    'the circle says how much it hides in its tooltip');
   // A card that is not a fold opens nothing. Checked before the circle is
   // hovered, because an outline lingers a moment after the pointer leaves one.
   await view.hoverCard('session-only#t2');
@@ -974,8 +996,8 @@ test('turning the layer off folds the turns it was holding open', async (t) => {
   await view.clickRail();
   assert.ok(!view.cardIds().includes('session-root#t2'), 'and folds away once the layer is off');
   assert.deepEqual(
-    [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold] .mtx-fold-count')].map((el) => el.textContent),
-    ['5'], 'one fold now covers the whole stretch');
+    [...view.dom.window.document.querySelectorAll('.mtx-card[data-fold]')].map((el) => el.getAttribute('title').split(' · ')[0]),
+    ['5 shared turns'], 'one fold now covers the whole stretch');
 });
 
 test('a 0.1.7 host opens a version through uiWorkspace, not the removed sessions.open', async (t) => {
