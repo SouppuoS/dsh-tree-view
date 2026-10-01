@@ -850,6 +850,32 @@ for (const [index, versions] of NON_OVERLAP_SHAPES.entries()) {
     }
   });
 }
+test('a card taller than its base height pushes the rows below it down', async (t) => {
+  // A tag note, the commit chips under it, or a title that wraps make a card
+  // several times its base height, and the layout has to be told: a row sized for
+  // a base card let a tall one spill over the row beneath it and draw a fold's
+  // circle across its lower half.
+  const flat = [{
+    sessionId: 'session-only', createdAt: 1, current: true,
+    turns: Array.from({ length: 3 }, (_, i) => ({ turn: i + 1, text: 'turn ' + (i + 1), time: i + 1 })),
+  }];
+  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, flat, undefined, 'session-only');
+  const doc = view.dom.window.document;
+  const topOf = (id) => Number(/translate\([-\d.]+px,\s*([-\d.]+)px\)/.exec(
+    doc.querySelector('.mtx-card[data-id="' + id + '"]').style.transform)[1]);
+  const before = topOf('session-only#t3');
+  // jsdom lays nothing out, so the height is stated rather than measured; a real
+  // browser measures the same element the same way.
+  for (const el of doc.querySelectorAll('.mtx-card')) {
+    Object.defineProperty(el, 'offsetHeight', { value: 300, configurable: true });
+  }
+  // Hovering the circle re-renders, which re-runs the measuring effect.
+  await view.hoverCard('session-only#t1#fold');
+  // The springs animate towards the new layout, so read once they have settled.
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
+  const after = topOf('session-only#t3');
+  assert.ok(after > before, 'the row below moved down: ' + before + ' -> ' + after);
+});
 test('the fold outline has no surface of its own but the words do', async (t) => {
   // The rules stand on the canvas the way the conversation view's turn rail
   // does; only the block that carries text has something to be read against,

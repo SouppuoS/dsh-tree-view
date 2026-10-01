@@ -1233,9 +1233,20 @@ function foldLongRuns(nodes, minHidden, keepIncoming) {
 /**
  * Tidy tree layout for turn nodes: leaves claim successive horizontal slots,
  * parents center over their children, siblings ordered by creation time.
+ *
+ * `measured` is what each node actually rendered as, when that is known. A card is
+ * not one fixed height: a tag note, the commit chips under it, or a title that
+ * wraps make it several times taller, and a layout that assumed one card height
+ * let the tall ones spill over the row below — which is how a fold's circle came to
+ * be drawn across the lower half of the card above it.
  */
-function layoutTurnTree(nodes) {
+function layoutTurnTree(nodes, measured) {
   const byId = new Map(nodes.map(function (n) { return [n.id, n]; }));
+  /** What a node's box is: what it measured, or what it is by construction. */
+  function heightOf(n) {
+    const seen = measured ? measured.get(n.id) : undefined;
+    return typeof seen === 'number' && seen > 0 ? seen : nodeRowHeight(n);
+  }
   const children = new Map();
   const roots = [];
   for (let i = 0; i < nodes.length; i++) {
@@ -1281,7 +1292,7 @@ function layoutTurnTree(nodes) {
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     const depth = depthOf.get(n.id) || 0;
-    const height = nodeRowHeight(n);
+    const height = heightOf(n);
     if (rowHeight[depth] === undefined || height > rowHeight[depth]) rowHeight[depth] = height;
   }
   const rowTop = [];
@@ -1294,7 +1305,7 @@ function layoutTurnTree(nodes) {
     const n = nodes[i];
     const depth = depthOf.get(n.id) || 0;
     const p = pos.get(n.id);
-    p.y = rowTop[depth] + (rowHeight[depth] - nodeRowHeight(n)) / 2;
+    p.y = rowTop[depth] + (rowHeight[depth] - heightOf(n)) / 2;
   }
 
   const edges = [];
@@ -1303,7 +1314,7 @@ function layoutTurnTree(nodes) {
       edges.push({ from: parentId, to: kids[i].id, onPath: !!kids[i].onCurrentPath });
     }
   });
-  return { pos: pos, edges: edges, byId: byId, nodes: nodes };
+  return { pos: pos, edges: edges, byId: byId, nodes: nodes, heightOf: heightOf };
 }
 
 // The fold outline's rules. A long fold is read as a block of columns rather than
@@ -2325,7 +2336,29 @@ return {
       const layoutKey = turnNodes.map(function (n) {
         return n.id + ':' + (n.parentId || '') + ':' + (n.onCurrentPath ? 1 : 0);
       }).join('|');
-      const layout = React.useMemo(function () { return layoutTurnTree(turnNodes); }, [layoutKey]);
+      // What each card actually came out as. A card's height depends on its own
+      // content and its fixed width, never on where the layout put it, so measuring
+      // and re-laying out settles in one extra pass and cannot oscillate.
+      const heightState = React.useState(null);
+      const cardHeights = heightState[0];
+      const setCardHeights = heightState[1];
+      React.useLayoutEffect(function () {
+        const next = new Map();
+        cardEls.current.forEach(function (el, id) {
+          if (el && el.offsetHeight > 0) next.set(id, el.offsetHeight);
+        });
+        setCardHeights(function (previous) {
+          if (previous !== null && previous.size === next.size) {
+            let same = true;
+            next.forEach(function (height, id) { if (previous.get(id) !== height) same = false; });
+            if (same) return previous;
+          }
+          return next;
+        });
+      });
+      const layout = React.useMemo(function () {
+        return layoutTurnTree(turnNodes, cardHeights);
+      }, [layoutKey, cardHeights]);
 
       // The reference layer follows the payload, not the layout. A link can land on
       // a node whose id, parent and path are all unchanged — a sender already on
@@ -2391,7 +2424,7 @@ return {
             left = Math.min(left, pos.x - CARD_W / 2);
             right = Math.max(right, pos.x + CARD_W / 2);
             top = Math.min(top, pos.y);
-            bottom = Math.max(bottom, pos.y + nodeRowHeight(n));
+            bottom = Math.max(bottom, pos.y + layout.heightOf(n));
           }
           if (!Number.isFinite(left)) return;
           boxes.push({
@@ -2864,7 +2897,7 @@ return {
                 key: key,
                 className: 'mtx-edge',
                 'data-path': e.onPath || undefined,
-                d: a && b ? edgePath(a.x, a.y + nodeRowHeight(layout.byId.get(e.from)) / 2, b.x, b.y + nodeRowHeight(layout.byId.get(e.to)) / 2) : undefined,
+                d: a && b ? edgePath(a.x, a.y + layout.heightOf(layout.byId.get(e.from)) / 2, b.x, b.y + layout.heightOf(layout.byId.get(e.to)) / 2) : undefined,
                 ref: function (el) { if (el) edgeEls.current.set(key, el); else edgeEls.current.delete(key); },
               });
             }),
@@ -2874,7 +2907,7 @@ return {
               return React.createElement('path', {
                 key: e.key,
                 className: 'mtx-edge mtx-edge-ref',
-                d: a && b ? edgePath(a.x, a.y + nodeRowHeight(layout.byId.get(e.from)) / 2, b.x, b.y + nodeRowHeight(layout.byId.get(e.to)) / 2) : undefined,
+                d: a && b ? edgePath(a.x, a.y + layout.heightOf(layout.byId.get(e.from)) / 2, b.x, b.y + layout.heightOf(layout.byId.get(e.to)) / 2) : undefined,
               });
             }) : null
           ),
