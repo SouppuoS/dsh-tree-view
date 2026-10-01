@@ -783,7 +783,7 @@ const CARD_H = 58;
 // the room the turns it hides would have taken. It is small and carries no text —
 // how many turns it hides, and which ones they are, is the tooltip's and the
 // outline's job.
-const FOLD_SIZE = 26;
+const FOLD_SIZE = 22;
 // Every node is anchored by the same card-width box and a circle is inset into it
 // by this much. One anchoring rule for every node is what keeps a circle's centre
 // on exactly the line the cards are centred on; a per-node width in the transform
@@ -793,7 +793,12 @@ const FOLD_INSET = (CARD_W - FOLD_SIZE) / 2;
 // A group frame is a card-sized padding plus a strip for its name.
 const GROUP_PAD = 14;
 const GROUP_HEAD = 20;
-const SLOT_X = 206;
+// Half a slot is where a node centred over two children lands, and that is the
+// closest two nodes in one row can ever come: half the pitch minus half a card.
+// So the pitch carries a circle's whole diameter plus the clearance on both sides,
+// and a circle sitting between two cards still has room to its left and right.
+const NODE_CLEARANCE = 8;
+const SLOT_X = CARD_W + FOLD_SIZE + NODE_CLEARANCE * 2;
 // The vertical air between two rows. A frame reaches GROUP_PAD + GROUP_HEAD above
 // its topmost node and GROUP_PAD below its lowest, so this is the smallest gap
 // that keeps two stacked frames apart. The rows themselves are only as tall as
@@ -1305,10 +1310,10 @@ function layoutTurnTree(nodes) {
 // scrolled, and the rail's height is fixed from the row count so that changing
 // which row is open cannot move the bars under the pointer — which is what made
 // them flip out from under the cursor as soon as the text block resized.
-const RAIL_ITEM_H = 11; // a 9px row plus the 2px gap between rows
-const RAIL_MAX_H = 300;
-const RAIL_COL_W = 26;
-const RAIL_COL_GAP = 8;
+const RAIL_ITEM_H = 17; // a 13px row plus the 4px gap between rows
+const RAIL_MAX_H = 306;
+const RAIL_COL_W = 36;
+const RAIL_COL_GAP = 10;
 
 function edgePath(x1, y1, x2, y2) {
   const dy = Math.max(26, (y2 - y1) * 0.5);
@@ -1424,7 +1429,7 @@ const CSS = [
   // pointer opens says which turns they are. Everything takes its colour from
   // `currentColor`, so a fold on the line you are reading stays accent and the
   // rest stay neutral.
-  '.mtx-card[data-fold]{width:' + FOLD_SIZE + 'px;height:' + FOLD_SIZE + 'px;margin-left:' + FOLD_INSET + 'px;padding:0;border-radius:50%;border:1px solid color-mix(in srgb,currentColor 52%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 15%,var(--mtx-surface));color:var(--dsw-alias-label-secondary,#bbb);box-shadow:0 2px 8px var(--mtx-shadow)}',
+  '.mtx-card[data-fold]{width:' + FOLD_SIZE + 'px;height:' + FOLD_SIZE + 'px;margin-left:' + FOLD_INSET + 'px;padding:0;border-radius:50%;border:1px solid color-mix(in srgb,currentColor 52%,transparent);background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 15%,var(--mtx-surface));color:var(--dsw-alias-label-secondary,#bbb);box-shadow:0 1px 3px var(--mtx-shadow)}',
   // A run every branch shares is the common opening; a run one branch carries on
   // with is not. The ring says which, without another word on the canvas.
   '.mtx-card[data-fold][data-fold-shared]{border-style:dashed}',
@@ -1485,11 +1490,11 @@ const CSS = [
   '.mtx-outline{position:absolute;z-index:9;display:flex;align-items:center;gap:10px;padding:0;background:none;box-shadow:none}',
   // Columns, not a scroller: a fold with forty turns in it is read as a block of
   // rules, and the width and height are set from the row count in the render.
-  '.mtx-outline-list{flex:none;display:flex;flex-flow:column wrap;align-content:flex-start;gap:2px 8px;scrollbar-width:none}',
-  '.mtx-outline-item{display:flex;align-items:center;width:26px;height:9px;padding:0;border:0;background:transparent;cursor:pointer}',
-  '.mtx-outline-bar{width:16px;height:2px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);transition:width .15s ease,background .15s ease}',
-  '.mtx-outline-item:hover .mtx-outline-bar{width:22px}',
-  '.mtx-outline-item[data-active] .mtx-outline-bar{width:24px;background:var(--mtx-accent)}',
+  '.mtx-outline-list{flex:none;box-sizing:border-box;padding:2px;display:flex;flex-flow:column wrap;align-content:flex-start;gap:4px 10px;scrollbar-width:none}',
+  '.mtx-outline-item{display:flex;align-items:center;width:36px;height:13px;padding:0;border:0;background:transparent;cursor:pointer}',
+  '.mtx-outline-bar{width:18px;height:2px;border-radius:2px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary,#888) 55%,transparent);transition:width .15s ease,background .15s ease}',
+  '.mtx-outline-item:hover .mtx-outline-bar{width:26px}',
+  '.mtx-outline-item[data-active] .mtx-outline-bar{width:30px;background:var(--mtx-accent)}',
   '.mtx-outline-info{flex:none;width:238px;display:flex;flex-direction:column;gap:4px;padding:9px 11px;border-radius:11px;background:color-mix(in srgb,var(--mtx-surface) 82%,transparent);backdrop-filter:blur(14px);box-shadow:0 10px 26px var(--mtx-shadow)}',
   // The whole turn, not a three-line taste of it: this block is the answer the
   // rules are an index to.
@@ -2276,10 +2281,13 @@ return {
       }
       function foldOutlineLeave() {
         if (foldHoverTimer.current) clearTimeout(foldHoverTimer.current);
+        // Generous on purpose: the panel has no surface of its own, so the
+        // pointer is travelling over the canvas, and a slip of a few pixels must
+        // not cost the reader the panel.
         foldHoverTimer.current = setTimeout(function () {
           foldHoverTimer.current = null;
           setFoldHover(null);
-        }, 160);
+        }, 400);
       }
       const springs = React.useRef(new Map());
       const layoutRef = React.useRef(null);

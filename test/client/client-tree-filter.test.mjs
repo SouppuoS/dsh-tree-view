@@ -774,7 +774,7 @@ test('a line ends at the middle of a node, where the node covers it', async (t) 
     // Every node is anchored by the same card-width box — a circle insets itself
     // with `margin-left` — so the centre is the same arithmetic for all of them.
     const fold = el.hasAttribute('data-fold');
-    return { x: Number(m[1]) + 88, y: Number(m[2]) + (fold ? 13 : 29) };
+    return { x: Number(m[1]) + 88, y: Number(m[2]) + (fold ? 11 : 29) };
   });
   assert.ok(centres.length > 0, 'the canvas has nodes');
   const ends = [];
@@ -803,12 +803,53 @@ test('a long fold reads as columns of rules, and the rules never move', async (t
   await view.hoverCard('session-only#t1#fold');
   const rail = view.dom.window.document.querySelector('.mtx-outline-list');
   assert.equal(view.outlineItems().length, 30, 'every hidden turn gets a rule');
-  // Twenty-seven rows fit in 300px at eleven pixels a row; the rest wrap.
-  assert.equal(rail.style.height, '297px', 'the rail is as tall as a full column of rules');
-  assert.equal(rail.style.width, '60px', 'and as wide as the columns it wrapped into');
+  // Eighteen rows fit in 306px at seventeen pixels a row; the rest wrap.
+  assert.equal(rail.style.height, '306px', 'the rail is as tall as a full column of rules');
+  assert.equal(rail.style.width, '82px', 'and as wide as the columns it wrapped into');
   await view.hoverOutlineRow(2);
-  assert.equal(rail.style.height, '297px', 'opening another rule does not resize the rail');
+  assert.equal(rail.style.height, '306px', 'opening another rule does not resize the rail');
 });
+const lineOf = (n, p) => Array.from({ length: n }, (_, i) => ({ turn: i + 1, text: p + ' ' + (i + 1), time: i + 1 }));
+// A row is a band of its own height, so overlap can only be horizontal, and the
+// only way two nodes in one row can come close is a node centred over two children
+// landing half a slot from a card. The slot pitch is what pays for that: it
+// carries a circle's whole diameter plus the clearance on both sides.
+const NON_OVERLAP_SHAPES = [
+  [{ sessionId: 's', createdAt: 1, current: true, turns: lineOf(36, 't') }],
+  [
+    { sessionId: 's', createdAt: 1, current: true, turns: lineOf(36, 't') },
+    { sessionId: 'a', parentSessionId: 's', createdAt: 2, forkTurn: 28, turns: lineOf(36, 'a') },
+  ],
+  [
+    { sessionId: 's', createdAt: 1, current: true, turns: lineOf(34, 't') },
+    { sessionId: 'a', parentSessionId: 's', createdAt: 2, forkTurn: 6, turns: lineOf(34, 'a') },
+    { sessionId: 'b', parentSessionId: 's', createdAt: 3, forkTurn: 20, turns: lineOf(34, 'b') },
+    { sessionId: 'c', parentSessionId: 'a', createdAt: 4, forkTurn: 24, turns: lineOf(34, 'c') },
+  ],
+];
+
+// One mount per test: the double replaces globals, and two mounts in one test
+// restore them out of order.
+for (const [index, versions] of NON_OVERLAP_SHAPES.entries()) {
+  test(`no two nodes overlap on canvas shape ${index}`, async (t) => {
+    const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 'default' }, versions, undefined, 's');
+    const boxes = [...view.dom.window.document.querySelectorAll('.mtx-card')].map((el) => {
+      const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(el.style.transform);
+      const fold = el.hasAttribute('data-fold');
+      return { id: el.getAttribute('data-id'), left: Number(m[1]) + (fold ? 77 : 0), top: Number(m[2]), w: fold ? 22 : 176, h: fold ? 22 : 58 };
+    });
+    assert.ok(boxes.length > 2, 'the canvas has nodes to compare');
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const gapX = Math.max(a.left, b.left) - Math.min(a.left + a.w, b.left + b.w);
+        const gapY = Math.max(a.top, b.top) - Math.min(a.top + a.h, b.top + b.h);
+        assert.equal(gapX > 0 || gapY > 0, true, 'boxes must not intersect: ' + a.id + ' and ' + b.id);
+      }
+    }
+  });
+}
 test('the fold outline has no surface of its own but the words do', async (t) => {
   // The rules stand on the canvas the way the conversation view's turn rail
   // does; only the block that carries text has something to be read against,
