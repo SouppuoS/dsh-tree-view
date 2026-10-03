@@ -2335,7 +2335,13 @@ return {
           try { probeFollow(followCtx); } catch (error) {}
         }
         return function () {
-          if (treeFollow.sessionId === mounted) treeFollow.on = false;
+          // A session switch unmounts this too, so the decision cannot be made here:
+          // whether the conversation changed or the reader chose another view is
+          // only known after the host has finished the switch. Deciding at once is
+          // what made the follow stop silently on the first switch.
+          setTimeout(function () {
+            if (treeFollow.sessionId === mounted && treeFollow.on) treeFollow.on = false;
+          }, 50);
         };
       }, [sessionId]);
       const titles = useSessionList().byId;
