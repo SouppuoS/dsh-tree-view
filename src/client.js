@@ -1331,6 +1331,40 @@ function edgePath(x1, y1, x2, y2) {
   return 'M' + x1 + ' ' + y1 + ' C' + x1 + ' ' + (y1 + dy) + ', ' + x2 + ' ' + (y2 - dy) + ', ' + x2 + ' ' + y2;
 }
 
+/**
+ * Which conversation view the reader is reading with, for the life of the page.
+ *
+ * DSH remembers a view PER CONVERSATION and restores it every time the reader
+ * switches, so a conversation it has never seen falls back to Chat. "Show me the
+ * Tree" is a statement about how the reader is reading, not about the conversation
+ * they happened to be in — so the Tree follows them, and choosing Chat anywhere
+ * ends it. (@see activateTreeView for why this is not done by clicking a tab.)
+ */
+const treeFollow = { sessionId: null, on: false };
+
+/**
+ * Ask the host for the Tree view, through the host's own API.
+ *
+ * `uiConversation.binding(sessionId).activate(viewId)` is the call DSH makes
+ * itself when the reader picks a tab, and it is what writes that conversation's
+ * remembered view. Clicking the tab in the DOM, or polling for it, is a patch on
+ * top of this: it lands a frame late, which is visible as the conversation
+ * flashing up before the Tree returns.
+ *
+ * @param ctx - the plugin context, to reach the conversation UI service.
+ * @param sessionId - the conversation the host has just opened.
+ */
+function activateTreeView(ctx, sessionId) {
+  try {
+    const ui = ctx && typeof ctx.get === 'function' ? ctx.get('uiConversation') : undefined;
+    if (!ui || typeof ui.binding !== 'function') return;
+    ui.binding(sessionId).activate('tree-view');
+  } catch (error) {
+    // A host that has moved this API, or does not know the session: the reader keeps
+    // whatever view the host chose, which is what they had before this existed.
+  }
+}
+
 /** Bring the Chat view forward; the first conversation tab is always Chat. */
 function showChat() {
   const g = realGlobal();
@@ -1615,7 +1649,19 @@ return {
       scope.effect(function () {
         const list = scope.get('sessions') && scope.get('sessions').list;
         if (!list || typeof list.subscribe !== 'function') return undefined;
-        return list.subscribe(function () { treeStore.invalidate(); });
+        return list.subscribe(function () {
+          treeStore.invalidate();
+          // The host has just opened a conversation, and it restores that
+          // conversation's own remembered view as it does. If the reader is reading
+          // with the Tree, ask for it again here — in the same synchronous update,
+          // so React batches the two and the conversation is never shown in between.
+          const snapshot = typeof list.getSnapshot === 'function' ? list.getSnapshot() : null;
+          const current = snapshot ? snapshot.current : undefined;
+          if (typeof current !== 'string') return;
+          const opened = current !== treeFollow.sessionId;
+          treeFollow.sessionId = current;
+          if (treeFollow.on && opened) activateTreeView(ctx, current);
+        });
       });
     });
 
@@ -2223,6 +2269,18 @@ return {
     function VersionsView(props) {
       const sessionId = props.sessionId;
       const tree = useTree(sessionId);
+      // The host renders only the ACTIVE view, so this component being mounted is the
+      // host's own answer to "the reader is reading with the Tree": no tab markup to
+      // match, and nothing to poll. Unmounting while the conversation has not changed
+      // means they chose another view, which is the one thing that ends the follow.
+      React.useEffect(function () {
+        const mounted = sessionId;
+        treeFollow.on = true;
+        treeFollow.sessionId = mounted;
+        return function () {
+          if (treeFollow.sessionId === mounted) treeFollow.on = false;
+        };
+      }, [sessionId]);
       const titles = useSessionList().byId;
       // The session list knows which sessions are subagents: DSH keeps a catalogue
       // per parent (`subagentsByParent`) and every entry names its child. The host
