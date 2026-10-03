@@ -121,24 +121,8 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
   const chatTab = dom.window.document.createElement('div');
   chatTab.setAttribute('role', 'tab');
   chatTab.setAttribute('aria-selected', 'false');
-  // Selecting a tab is the host's job, so the double records which one is showing.
-  chatTab.addEventListener('click', () => {
-    tabClicks.push(true);
-    chatTab.setAttribute('aria-selected', 'true');
-    treeTab.setAttribute('aria-selected', 'false');
-  });
+  chatTab.addEventListener('click', () => { tabClicks.push(true); });
   dom.window.document.body.appendChild(chatTab);
-  // The plugin's own tab, next to it. Selecting a tab is the host's job, so the two
-  // doubles just record which one is showing, the way the host's tabs do.
-  const treeTab = dom.window.document.createElement('div');
-  treeTab.setAttribute('role', 'tab');
-  treeTab.setAttribute('aria-selected', 'false');
-  treeTab.textContent = 'Tree';
-  treeTab.addEventListener('click', () => {
-    treeTab.setAttribute('aria-selected', 'true');
-    chatTab.setAttribute('aria-selected', 'false');
-  });
-  dom.window.document.body.appendChild(treeTab);
   await act(async () => { root.render(React.createElement(view, { sessionId: viewSessionId })); });
   await act(async () => { await Promise.resolve(); });
   const cardIds = () => [...dom.window.document.querySelectorAll('.mtx-card')].map((el) => el.getAttribute('data-id'));
@@ -230,7 +214,7 @@ async function mountView(t, prefs, versions = VERSIONS, fetchImpl, viewSessionId
     dom, cardIds, offsets, titles, links, clickCard, foldCard,
     menuItems, openMenu, clickMenuItem, clickRail, hoverCard, outlineItems, outlineTurns, clickOutline, hoverOutlineRow, worldScale, wheelOn,
     confirmTitle, confirmButtons, clickConfirm, pressDown, graphsPanning,
-    opened, workspaceOpened, tabClicks, consoleErrors, chatTab, treeTab,
+    opened, workspaceOpened, tabClicks, consoleErrors,
   };
 }
 
@@ -891,33 +875,6 @@ test('a card taller than its base height pushes the rows below it down', async (
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
   const after = topOf('session-only#t3');
   assert.ok(after > before, 'the row below moved down: ' + before + ' -> ' + after);
-});
-test('the Tree view stays open across conversations until the reader leaves it', async (t) => {
-  // DSH picks a conversation view per conversation, so switching sessions drops the
-  // reader back into Chat. Opening the Tree is a statement about how they want to
-  // read, and it has to survive that — but going back to Chat themselves is the one
-  // thing that ends it.
-  const view = await mountView(t, { dropEmptyForks: true, foldSharedAt: 0 }, VERSIONS);
-  const open = (tab) => {
-    tab.dispatchEvent(new view.dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
-    tab.click();
-  };
-  const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
-
-  open(view.treeTab);
-  assert.equal(view.treeTab.getAttribute('aria-selected'), 'true', 'the reader opened the Tree');
-
-  // A session switch: the host puts Chat back without the reader touching a tab.
-  view.chatTab.setAttribute('aria-selected', 'true');
-  view.treeTab.setAttribute('aria-selected', 'false');
-  await settle();
-  assert.equal(view.treeTab.getAttribute('aria-selected'), 'true', 'and it comes back on its own');
-
-  // Going back to Chat is the reader's own decision, and it is final.
-  open(view.chatTab);
-  await settle();
-  assert.equal(view.treeTab.getAttribute('aria-selected'), 'false',
-    'a reader who leaves the Tree stays where they put it');
 });
 test('the fold outline has no surface of its own but the words do', async (t) => {
   // The rules stand on the canvas the way the conversation view's turn rail
