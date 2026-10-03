@@ -1354,6 +1354,34 @@ const treeFollow = { sessionId: null, on: false };
  * @param ctx - the plugin context, to reach the conversation UI service.
  * @param sessionId - the conversation the host has just opened.
  */
+// The plugin context, kept for the one probe below. The view component has no ctx
+// of its own, and this is the only thing it needs one for.
+let followCtx = null;
+let followProbed = false;
+
+/**
+ * Say once, in one line, what this host actually exposes for the follow to use.
+ * Guessing at service names and snapshot shapes from the outside is how the two
+ * previous attempts went wrong; this turns it into something readable.
+ */
+function probeFollow(ctx) {
+  const out = { uiConversation: null, sessions: null, listKeys: null, snapshotKeys: null, current: null };
+  try {
+    const ui = ctx && typeof ctx.get === 'function' ? ctx.get('uiConversation') : undefined;
+    out.uiConversation = !!ui && typeof ui.binding === 'function';
+  } catch (error) { out.uiConversation = 'threw'; }
+  try {
+    const sessions = ctx && typeof ctx.get === 'function' ? ctx.get('sessions') : undefined;
+    out.sessions = !!sessions;
+    const list = sessions && sessions.list;
+    out.listKeys = list ? Object.keys(list) : null;
+    const snap = list && typeof list.getSnapshot === 'function' ? list.getSnapshot() : null;
+    out.snapshotKeys = snap ? Object.keys(snap).slice(0, 14) : null;
+    out.current = snap ? snap.current : null;
+  } catch (error) { out.sessions = 'threw'; }
+  console.warn('[dsh-tree-view] follow probe', JSON.stringify(out));
+}
+
 // Said once per page: a follow that cannot happen is a bug report, not a silence.
 let followReported = false;
 function reportFollow(reason, error) {
@@ -1657,6 +1685,7 @@ return {
     // subscribing to when it exists — but it is not worth refusing to boot over.
     // `ctx.inject` is the sanctioned optional form: the callback runs whenever the
     // service turns up, and never blocks the plugin itself.
+    followCtx = ctx;
     ctx.inject(['sessions'], function (scope) {
       scope.effect(function () {
         const list = scope.get('sessions') && scope.get('sessions').list;
@@ -2292,6 +2321,10 @@ return {
         const mounted = sessionId;
         treeFollow.on = true;
         treeFollow.sessionId = mounted;
+        if (!followProbed) {
+          followProbed = true;
+          try { probeFollow(followCtx); } catch (error) {}
+        }
         return function () {
           if (treeFollow.sessionId === mounted) treeFollow.on = false;
         };
