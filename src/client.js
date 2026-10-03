@@ -1354,14 +1354,26 @@ const treeFollow = { sessionId: null, on: false };
  * @param ctx - the plugin context, to reach the conversation UI service.
  * @param sessionId - the conversation the host has just opened.
  */
+// Said once per page: a follow that cannot happen is a bug report, not a silence.
+let followReported = false;
+function reportFollow(reason, error) {
+  if (followReported) return;
+  followReported = true;
+  console.warn('[dsh-tree-view] the Tree view cannot follow you to another conversation: ' + reason, error || '');
+}
+
 function activateTreeView(ctx, sessionId) {
+  const ui = ctx && typeof ctx.get === 'function' ? ctx.get('uiConversation') : undefined;
+  if (!ui || typeof ui.binding !== 'function') {
+    reportFollow('this host exposes no uiConversation service');
+    return;
+  }
   try {
-    const ui = ctx && typeof ctx.get === 'function' ? ctx.get('uiConversation') : undefined;
-    if (!ui || typeof ui.binding !== 'function') return;
     ui.binding(sessionId).activate('tree-view');
   } catch (error) {
     // A host that has moved this API, or does not know the session: the reader keeps
     // whatever view the host chose, which is what they had before this existed.
+    reportFollow('activating the view threw', error);
   }
 }
 
@@ -1657,7 +1669,10 @@ return {
           // so React batches the two and the conversation is never shown in between.
           const snapshot = typeof list.getSnapshot === 'function' ? list.getSnapshot() : null;
           const current = snapshot ? snapshot.current : undefined;
-          if (typeof current !== 'string') return;
+          if (typeof current !== 'string') {
+            if (treeFollow.on) reportFollow('the session list reports no current session');
+            return;
+          }
           const opened = current !== treeFollow.sessionId;
           treeFollow.sessionId = current;
           if (treeFollow.on && opened) activateTreeView(ctx, current);
