@@ -1380,6 +1380,15 @@ function probeFollow(ctx) {
     out.current = snap ? snap.current : null;
   } catch (error) { out.sessions = 'threw'; }
   console.warn('[dsh-tree-view] follow probe', JSON.stringify(out));
+  // The browser console is not always where a reader can look, so the same line is
+  // drawn on the page for one line's worth of pixels. Temporary by design.
+  try {
+    const doc = realGlobal().document;
+    const banner = doc.createElement('div');
+    banner.textContent = '[dsh-tree-view] follow probe ' + JSON.stringify(out);
+    banner.setAttribute('style', 'position:fixed;left:8px;bottom:8px;z-index:2147483647;background:#101418;color:#e6e6e6;font:11px/1.45 ui-monospace,monospace;padding:6px 8px;border-radius:6px;max-width:86vw;white-space:pre-wrap;pointer-events:none');
+    doc.body.appendChild(banner);
+  } catch (error) {}
 }
 
 // Said once per page: a follow that cannot happen is a bug report, not a silence.
