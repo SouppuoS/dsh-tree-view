@@ -1331,12 +1331,88 @@ function edgePath(x1, y1, x2, y2) {
   return 'M' + x1 + ' ' + y1 + ' C' + x1 + ' ' + (y1 + dy) + ', ' + x2 + ' ' + (y2 - dy) + ', ' + x2 + ' ' + y2;
 }
 
+/**
+ * The conversation view the reader chose, for the life of the page. The host picks a
+ * tab per conversation, so switching sessions drops them back into Chat; a reader
+ * who opened the Tree wants the Tree wherever they go next, until they go back
+ * themselves. Only their own hand sets this, and bringing Chat forward on purpose —
+ * clicking a node, say — releases it.
+ */
+const viewIntent = { pinned: false };
+
 /** Bring the Chat view forward; the first conversation tab is always Chat. */
 function showChat() {
+  viewIntent.pinned = false;
   const g = realGlobal();
   if (!g || !g.document) return;
   const tab = g.document.querySelector('[role=tab]');
   if (tab && tab.getAttribute('aria-selected') !== 'true') tab.click();
+}
+
+/**
+ * Keep the Tree view selected across conversations.
+ *
+ * The host owns the tabs, so this only ever does what the reader could do: it
+ * clicks the Tree tab back. It never runs while they are in Chat, and it gives up
+ * rather than fight a host that keeps re-selecting Chat underneath it.
+ *
+ * @param t - the plugin's translator, for this plugin's own tab label.
+ * @returns a disposer for the listener and the timer.
+ */
+function installTreeViewPin(t) {
+  const g = realGlobal();
+  const doc = g && g.document;
+  if (!doc || typeof doc.addEventListener !== 'function' || typeof g.setInterval !== 'function') {
+    return function () {};
+  }
+  const label = function () { return typeof t === 'function' ? t('view') : 'Tree'; };
+  const treeTab = function () {
+    const tabs = doc.querySelectorAll('[role=tab]');
+    for (let i = 0; i < tabs.length; i++) {
+      if ((tabs[i].textContent || '').trim() === label()) return tabs[i];
+    }
+    return null;
+  };
+  const onPointerDown = function (event) {
+    const target = event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    const tab = target.closest('[role=tab]');
+    if (!tab) return;
+    // The reader's own hand is the only thing that changes this.
+    viewIntent.pinned = (tab.textContent || '').trim() === label();
+  };
+  // The timer only exists while the reader is holding the Tree open, so a page that
+  // never used it pays nothing — and no test has to remember to clear it.
+  let timer = 0;
+  let refused = 0;
+  const stop = function () {
+    if (timer !== 0) { g.clearInterval(timer); timer = 0; }
+  };
+  const tick = function () {
+    if (!viewIntent.pinned) { stop(); return; }
+    const tab = treeTab();
+    if (tab === null) return;
+    if (tab.getAttribute('aria-selected') === 'true') { refused = 0; return; }
+    // Four tries is enough to tell "the host put Chat back" from "the host will not
+    // have it", and the second one has to stop rather than flicker forever.
+    if (refused >= 4) { viewIntent.pinned = false; stop(); return; }
+    refused += 1;
+    tab.click();
+  };
+  const onPointerDown2 = function (event) {
+    onPointerDown(event);
+    if (viewIntent.pinned) {
+      refused = 0;
+      if (timer === 0) timer = g.setInterval(tick, 250);
+    } else {
+      stop();
+    }
+  };
+  doc.addEventListener('pointerdown', onPointerDown2, true);
+  return function () {
+    doc.removeEventListener('pointerdown', onPointerDown2, true);
+    stop();
+  };
 }
 
 /**
@@ -3565,5 +3641,10 @@ return {
         TurnTagAction
       );
     });
+
+    // The Tree view is a page, not a per-conversation tab: opening it in one
+    // conversation keeps it open in the next, until the reader goes back to Chat.
+    if (typeof ctx.effect === 'function') ctx.effect(function () { return installTreeViewPin(t); });
+    else installTreeViewPin(t);
   }
 };
